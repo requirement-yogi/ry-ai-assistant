@@ -33,10 +33,6 @@ export async function submitMarkdown(markdown: string): Promise<{ success: boole
 
   const url = `${API_BASE_URL}/api/confluence/pages/from-markdown?${params}`
 
-  // Logs available at: ~/Library/Logs/Claude/mcp-server-prompt2requirements.log
-  console.error("[submit] URL →", url)
-  console.error("[submit] Token present →", token ? `yes (${token.slice(0, 8)}...)` : "NO — check API_ACCESS_TOKEN in claude_desktop_config.json")
-
   const formData = new FormData()
   const blob = new Blob([markdown], { type: "text/markdown" })
   formData.append("file", blob, "requirements.md")
@@ -51,11 +47,8 @@ export async function submitMarkdown(markdown: string): Promise<{ success: boole
       body: formData,
     })
 
-    console.error("[submit] Status →", response.status)
-
     if (!response.ok) {
       const text = await response.text()
-      console.error("[submit] Error response →", text)
       return { success: false, message: `Error ${response.status}: ${text}` }
     }
 
@@ -65,7 +58,6 @@ export async function submitMarkdown(markdown: string): Promise<{ success: boole
       message: `✅ Page created successfully.\n${JSON.stringify(data, null, 2)}`,
     }
   } catch (err) {
-    console.error("[submit] Network error →", err)
     return {
       success: false,
       message: `Network error: ${err instanceof Error ? err.message : String(err)}`,
