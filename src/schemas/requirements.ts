@@ -7,7 +7,7 @@ export const PropertySchema = z.object({
 
 export const RequirementNodeSchema: z.ZodType<RequirementNode> = z.lazy(() =>
   z.object({
-    key: z.string().regex(/^[A-Z]{2,8}-\d{3}$/, "Format attendu : PREFIX-NNN (ex: WEBHOOK-001)"),
+    key: z.string().regex(/^[A-Z]{2,8}-\d{3}$/, "Expected format: PREFIX-NNN (e.g. WEBHOOK-001)"),
     title: z.string(),
     properties: z.array(PropertySchema).default([]),
     children: z.array(RequirementNodeSchema).default([]),
@@ -24,8 +24,8 @@ export const RequirementsTreeSchema = z.object({
 
 export type Property = z.infer<typeof PropertySchema>
 export type RequirementNode = {
-  key: string   // code identifiant : FORMAT [A-Z]{2,8}-\d{3} ex: WEBHOOK-001
-  title: string // texte descriptif : ex: "Webhook de déclenchement café"
+  key: string   // identifier: format [A-Z]{2,8}-\d{3}, e.g. WEBHOOK-001
+  title: string // descriptive text, e.g. "Coffee brewing webhook"
   properties: Property[]
   children: RequirementNode[]
 }

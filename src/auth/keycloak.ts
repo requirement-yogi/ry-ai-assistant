@@ -19,7 +19,7 @@ async function fetchToken(): Promise<string> {
 
   if (!url || !realm || !clientId || !clientSecret) {
     throw new Error(
-      "Variables Keycloak manquantes : KEYCLOAK_URL, KEYCLOAK_REALM, KEYCLOAK_CLIENT_ID, KEYCLOAK_CLIENT_SECRET"
+      "Missing Keycloak environment variables: KEYCLOAK_URL, KEYCLOAK_REALM, KEYCLOAK_CLIENT_ID, KEYCLOAK_CLIENT_SECRET"
     )
   }
 
@@ -37,12 +37,12 @@ async function fetchToken(): Promise<string> {
 
   if (!response.ok) {
     const text = await response.text()
-    throw new Error(`Keycloak a répondu ${response.status} : ${text}`)
+    throw new Error(`Keycloak responded with ${response.status}: ${text}`)
   }
 
   const data = (await response.json()) as TokenResponse
 
-  // Cache avec une marge de 30s avant l'expiration réelle
+  // Cache the token with a 30s safety margin before actual expiry
   cached = {
     value: data.access_token,
     expiresAt: Date.now() + (data.expires_in - 30) * 1000,
@@ -51,7 +51,7 @@ async function fetchToken(): Promise<string> {
   return cached.value
 }
 
-/** Retourne un access token valide. Renouvelle automatiquement si expiré. */
+/** Returns a valid access token, automatically refreshing it if expired. */
 export async function getAccessToken(): Promise<string> {
   if (cached && Date.now() < cached.expiresAt) {
     return cached.value

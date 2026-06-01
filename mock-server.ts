@@ -22,7 +22,7 @@ const server = http.createServer((req, res) => {
       const filename = path.join(OUTPUT_DIR, `requirements-${timestamp}.md`)
 
       fs.writeFileSync(filename, body, "utf-8")
-      console.log(`✅ Fichier créé : ${filename}`)
+      console.log(`✅ File saved: ${filename}`)
 
       res.writeHead(200, { "Content-Type": "application/json" })
       res.end(JSON.stringify({ success: true, file: filename }))
@@ -34,6 +34,6 @@ const server = http.createServer((req, res) => {
 })
 
 server.listen(PORT, () => {
-  console.log(`🚀 Mock API server démarré sur http://localhost:${PORT}`)
-  console.log(`📁 Les fichiers MD seront sauvegardés dans ${OUTPUT_DIR}/`)
+  console.log(`🚀 Mock API server running at http://localhost:${PORT}`)
+  console.log(`📁 Markdown files will be saved to ${OUTPUT_DIR}/`)
 })

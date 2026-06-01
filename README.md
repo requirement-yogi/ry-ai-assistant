@@ -1,12 +1,12 @@
 # Prompt2Requirements
 
-Serveur MCP (Model Context Protocol) en TypeScript qui permet à un LLM client (Claude Desktop, Claude Code, Cursor…) de transformer un prompt utilisateur en arbre de requirements structuré, de l'affiner en conversation, puis de l'envoyer à un backend qui génère une page de spécifications (Confluence ou autre).
+An MCP (Model Context Protocol) server written in TypeScript that lets an LLM client (Claude Desktop, Claude Code, Cursor…) turn a user prompt into a structured requirements tree, refine it through conversation, and send it to a backend that generates a specification page (Confluence or any other tool).
 
-## Prérequis
+## Prerequisites
 
 - Node.js 18+
 - npm
-- Claude Desktop (ou tout client MCP compatible)
+- Claude Desktop (or any MCP-compatible client)
 
 ## Installation
 
@@ -17,7 +17,7 @@ npm run build
 
 ## Configuration
 
-Copier `.env.example` en `.env` et renseigner les valeurs :
+Copy `.env.example` to `.env` and fill in your values:
 
 ```bash
 cp .env.example .env
@@ -28,16 +28,16 @@ API_BASE_URL=http://localhost:8082
 API_ACCESS_TOKEN=your-access-token
 ```
 
-## Connexion à Claude Desktop
+## Connecting to Claude Desktop
 
-Éditer `~/Library/Application Support/Claude/claude_desktop_config.json` :
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "prompt2requirements": {
       "command": "node",
-      "args": ["/chemin/vers/Prompt2Requirements/dist/index.js"],
+      "args": ["/path/to/Prompt2Requirements/dist/index.js"],
       "env": {
         "API_BASE_URL": "http://localhost:8082",
         "API_ACCESS_TOKEN": "your-access-token"
@@ -47,63 +47,63 @@ API_ACCESS_TOKEN=your-access-token
 }
 ```
 
-Redémarrer Claude Desktop. L'icône 🔨 en bas de la zone de saisie confirme que les tools sont chargés.
+Restart Claude Desktop. The 🔨 icon at the bottom of the input area confirms the tools are loaded.
 
-## Utilisation
+## Usage
 
-Décrire une feature en langage naturel dans Claude Desktop :
+Describe a feature in plain language in Claude Desktop:
 
-> "Je veux spécifier une nouvelle feature sur mon projet de machine à café connectée. J'aimerais ajouter un webhook pour déclencher la préparation d'un café depuis une automatisation externe."
+> "I want to specify a new feature for my connected coffee machine project. I'd like to add a webhook to trigger coffee preparation from an external automation."
 
-Claude utilise alors les tools MCP pour :
+Claude will then use the MCP tools to:
 
-1. Décomposer le besoin en arbre de requirements JSON
-2. Afficher un aperçu Markdown avec des tableaux structurés
-3. Affiner en boucle selon le feedback
-4. Envoyer la page finale au backend
+1. Break down the request into a structured JSON requirements tree
+2. Display a Markdown preview with structured tables
+3. Refine iteratively based on your feedback
+4. Send the final page to the backend
 
-## Les 4 tools MCP
+## The 4 MCP Tools
 
-| Tool | Rôle |
+| Tool | Role |
 |---|---|
-| `analyze_prompt` | Décompose le prompt en arbre de requirements JSON |
-| `refine_requirements` | Applique le feedback utilisateur sur l'arbre JSON |
-| `render_requirements` | Génère le Markdown structuré depuis le JSON |
-| `submit_requirements` | Envoie le Markdown final à l'API backend |
+| `analyze_prompt` | Breaks down a prompt into a JSON requirements tree |
+| `refine_requirements` | Applies user feedback to the JSON tree |
+| `render_requirements` | Generates structured Markdown from the JSON |
+| `submit_requirements` | Sends the final Markdown to the backend API |
 
-## Format du document généré
+## Generated Document Format
 
-Chaque requirement est rendu dans un tableau :
+Each requirement is rendered as a table.
 
-**Parent (tableau vertical) :**
+**Parent requirement (vertical table):**
 ```markdown
-## Titre du requirement
+## Requirement title
 
 | | |
 | :--- | :--- |
-| **Clé** | WEBHOOK-001 |
-| **Titre** | Webhook de déclenchement café |
-| **Description** | Exposer un endpoint HTTP... |
-| **Priorité** | Must |
+| **Key** | WEBHOOK-001 |
+| **Title** | Coffee brewing webhook |
+| **Description** | Expose an HTTP endpoint... |
+| **Priority** | Must |
 ```
 
-**Enfants (tableau horizontal) :**
+**Child requirements (horizontal table):**
 ```markdown
-| Clé | Titre | Description | Critères d'acceptation |
+| Key | Title | Description | Acceptance criteria |
 | :--- | :--- | :--- | :--- |
-| RECV-001 | Réception et validation | ... | 200 si accepté... |
-| AUTH-001 | Authentification | ... | 401 si secret invalide |
+| RECV-001 | Receive and validate | ... | 200 if accepted... |
+| AUTH-001 | Authentication | ... | 401 if secret invalid |
 ```
 
-Du contenu Markdown libre (blocs de code, listes, notes) peut être ajouté autour des tableaux.
+Free Markdown content (code blocks, lists, notes) can be added around the tables.
 
-## Schéma JSON
+## JSON Schema
 
 ```typescript
 Property        = { label: string, value: string }
 RequirementNode = {
-  key: string,    // identifiant : format [A-Z]{2,8}-\d{3}, ex: WEBHOOK-001
-  title: string,  // texte descriptif
+  key: string,    // identifier: format [A-Z]{2,8}-\d{3}, e.g. WEBHOOK-001
+  title: string,  // descriptive text
   properties: Property[],
   children: RequirementNode[]
 }
@@ -116,17 +116,17 @@ RequirementsTree = {
 }
 ```
 
-## Développement
+## Development
 
 ```bash
-npm run dev      # Lance le serveur MCP en mode dev (tsx, sans build)
+npm run dev      # Start the MCP server in dev mode (tsx, no build needed)
 npm run build    # Compile TypeScript → dist/
-npm run mock     # Lance un serveur mock local sur :3000 (sauvegarde les .md dans output/)
+npm run mock     # Start a local mock server on :3000 (saves .md files to output/)
 ```
 
 ## Logs
 
-Les logs du serveur MCP sont accessibles dans :
+MCP server logs are available at:
 
 ```
 ~/Library/Logs/Claude/mcp-server-prompt2requirements.log
@@ -140,14 +140,14 @@ tail -f ~/Library/Logs/Claude/mcp-server-prompt2requirements.log
 
 ```
 src/
-├── index.ts              # Serveur MCP — registration des 4 tools
+├── index.ts              # MCP server — registers the 4 tools
 ├── auth/
-│   └── keycloak.ts       # Client credentials OAuth2 (si besoin)
+│   └── keycloak.ts       # OAuth2 client credentials (if needed)
 ├── schemas/
-│   └── requirements.ts   # Schéma Zod + types TypeScript
+│   └── requirements.ts   # Zod schema + TypeScript types
 └── tools/
-    ├── analyze.ts         # Constantes du tool analyze
-    ├── refine.ts          # Constantes du tool refine
-    ├── render.ts          # Conversion JSON → Markdown
-    └── submit.ts          # POST Markdown vers l'API backend
+    ├── analyze.ts         # analyze tool constants
+    ├── refine.ts          # refine tool constants
+    ├── render.ts          # JSON → Markdown conversion
+    └── submit.ts          # POST Markdown to the backend API
 ```

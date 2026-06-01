@@ -18,10 +18,11 @@ function renderNode(node: RequirementNode, level: number): string {
   const heading = "#".repeat(level)
   let md = `${heading} ${node.title}\n\n`
 
-  // Tableau vertical sans header (trick MD → ADF vertical table)
+  // Vertical table with no header row (MD trick → ADF vertical table)
   md += `| | |\n`
   md += `| :--- | :--- |\n`
-  md += `| **Clé** | ${node.key} |\n`
+  md += `| **Key** | ${node.key} |\n`
+  md += `| **Title** | ${escapeCell(node.title)} |\n`
   for (const prop of node.properties) {
     md += `| **${prop.label}** | ${escapeCell(prop.value)} |\n`
   }
@@ -29,14 +30,15 @@ function renderNode(node: RequirementNode, level: number): string {
 
   if (node.children.length === 0) return md
 
+  // Leaf children (no children of their own) → horizontal table
   const leaves = node.children.filter((c) => c.children.length === 0)
+  // Branch children (have children) → rendered recursively
   const branches = node.children.filter((c) => c.children.length > 0)
 
-  // Tableau horizontal pour les enfants feuilles (sans titre de section)
   if (leaves.length > 0) {
     const labels = collectLabels(leaves)
 
-    md += `| Clé | Titre | ${labels.join(" | ")} |\n`
+    md += `| Key | Title | ${labels.join(" | ")} |\n`
     md += `| :--- | :--- | ${labels.map(() => ":---").join(" | ")} |\n`
 
     for (const child of leaves) {
@@ -49,7 +51,6 @@ function renderNode(node: RequirementNode, level: number): string {
     md += "\n"
   }
 
-  // Récursion pour les enfants avec leurs propres enfants
   for (const branch of branches) {
     md += renderNode(branch, level + 1)
   }
@@ -58,7 +59,7 @@ function renderNode(node: RequirementNode, level: number): string {
 }
 
 export function renderTree(tree: RequirementsTree): string {
-  const date = new Date(tree.created_at).toLocaleDateString("fr-FR", {
+  const date = new Date(tree.created_at).toLocaleDateString("en-GB", {
     day: "numeric",
     month: "long",
     year: "numeric",
@@ -66,7 +67,7 @@ export function renderTree(tree: RequirementsTree): string {
 
   let md = `# ${tree.project_name}\n\n`
   md += `*${tree.description}*\n\n`
-  md += `> Généré le ${date}\n\n`
+  md += `> Generated on ${date}\n\n`
   md += `---\n\n`
 
   for (const req of tree.requirements) {
@@ -78,10 +79,10 @@ export function renderTree(tree: RequirementsTree): string {
 
 export const RENDER_TOOL = {
   name: "render_requirements",
-  description: `Convertit un arbre de requirements JSON en document Markdown structuré avec des tableaux.
+  description: `Converts a requirements JSON tree into a structured Markdown document with tables.
 
-Utilise ce tool après analyze_prompt ou refine_requirements pour afficher un aperçu lisible des requirements.
-Le Markdown produit sera aussi ce qui est envoyé au backend via submit_requirements.`,
+Use this tool after analyze_prompt or refine_requirements to display a readable preview.
+The produced Markdown is also what gets sent to the backend via submit_requirements.`,
 } as const
 
 export function validateAndRender(raw: unknown): string {

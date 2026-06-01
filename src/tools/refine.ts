@@ -2,21 +2,21 @@ import { RequirementsTreeSchema, type RequirementsTree } from "../schemas/requir
 
 export const REFINE_TOOL = {
   name: "refine_requirements",
-  description: `Affine un arbre de requirements existant en appliquant le feedback utilisateur.
+  description: `Refines an existing requirements tree by applying user feedback.
 
-Tu reçois l'arbre actuel (current_tree) et le feedback de l'utilisateur (feedback).
-Tu dois modifier l'arbre en tenant compte du feedback : ajouter, supprimer, reformuler ou réorganiser des requirements.
-Retourne UNIQUEMENT le nouvel arbre JSON complet, valide et modifié.`,
+Receives the current tree (current_tree) and the user's feedback.
+Modifies the tree accordingly: add, remove, rephrase, or reorganize requirements.
+Returns ONLY the complete, valid, updated JSON tree.`,
   inputSchema: {
     type: "object",
     properties: {
       current_tree: {
         type: "object",
-        description: "L'arbre de requirements actuel (objet JSON complet)",
+        description: "The current requirements tree (complete JSON object)",
       },
       feedback: {
         type: "string",
-        description: "Le feedback ou les modifications demandées par l'utilisateur",
+        description: "The feedback or changes requested by the user",
       },
     },
     required: ["current_tree", "feedback"],

@@ -10,51 +10,51 @@ const server = new McpServer({
   version: "1.0.0",
 })
 
-// Règles de format Markdown partagées entre les tools — injectées dans les instructions
+// Format rules shared across tools — injected into instructions
 const FORMAT_RULES = `
-RÈGLE SUR LE FORMAT DES REQUIREMENTS :
-Chaque requirement doit TOUJOURS apparaître dans un tableau. Ce format est obligatoire pour le parsing downstream (Confluence, autres apps).
+REQUIREMENT FORMAT RULES:
+Every requirement must always appear in a table. This is mandatory for downstream parsing (Confluence, other apps).
 
-Tableau VERTICAL (requirement parent) :
+VERTICAL table (parent requirement):
   | | |
   | :--- | :--- |
-  | **Clé** | PREFIX-001 |          ← 1ère ligne : la clé
-  | **Titre** | Titre descriptif |  ← 2ème ligne : le titre
-  | **Prop** | valeur |             ← lignes suivantes : les properties
+  | **Key** | PREFIX-001 |         ← 1st row: the requirement key
+  | **Title** | Descriptive title | ← 2nd row: the title
+  | **Prop** | value |              ← following rows: properties
 
-Tableau HORIZONTAL (requirements enfants) :
-  | Clé | Titre | Prop1 | Prop2 |   ← 1ère colonne : clé, 2ème : titre, reste : properties
+HORIZONTAL table (child requirements):
+  | Key | Title | Prop1 | Prop2 |   ← 1st col: key, 2nd: title, rest: properties
   | :--- | :--- | :--- | :--- |
-  | PREFIX-001 | Titre | ... | ... |
+  | PREFIX-001 | Title | ... | ... |
 
-EN DEHORS des tableaux de requirements, le Markdown est libre :
-tu peux ajouter des blocs de code, listes, notes, exemples, callouts, texte d'introduction, etc.
-Ces éléments enrichissent le document sans casser le parsing des requirements.
+Outside of requirement tables, Markdown is free:
+you may add code blocks, lists, notes, examples, callouts, intro text, etc.
+These elements enrich the document without breaking requirement parsing.
 
-Ce qui est interdit : sortir un requirement de son tableau (le mettre en texte libre, titre seul, liste, etc.).
-Ce qui est autorisé : ajouter du contenu Markdown libre autour des tableaux.`
+What is forbidden: taking a requirement out of its table (free text, standalone heading, list item, etc.).
+What is allowed: adding any free Markdown content around the tables.`
 
 server.tool(
   "analyze_prompt",
-  `Analyse un prompt utilisateur et produit un arbre de requirements structuré au format JSON.
+  `Analyzes a user prompt and produces a structured requirements tree in JSON format.
 
-Décompose la demande en requirements hiérarchiques (2 à 4 niveaux selon la complexité).
+Break down the request into hierarchical requirements (2 to 4 levels depending on complexity).
 
-Properties recommandées :
-- "Description" : explication détaillée
-- "Critères d'acceptation" : conditions de validation
-- "Priorité" : Must / Should / Could / Won't
+Recommended properties:
+- "Description": detailed explanation
+- "Acceptance criteria": validation conditions
+- "Priority": Must / Should / Could / Won't
 
-RÈGLES POUR "key" :
-- Format obligatoire : [A-Z]{2,8}-\\d{3} (ex: WEBHOOK-001, AUTH-002)
-- Préfixe = abréviation significative du domaine (2-8 lettres majuscules)
-- Numérotation séquentielle et unique dans tout l'arbre
-- Les enfants peuvent avoir un préfixe différent si leur domaine est distinct
+KEY FORMAT RULES:
+- Mandatory format: [A-Z]{2,8}-\\d{3} (e.g. WEBHOOK-001, AUTH-002)
+- Prefix = meaningful abbreviation of the requirement domain (2-8 uppercase letters)
+- Sequential numbering, unique across the entire tree
+- Children may use a different prefix if their domain differs
 
 ${FORMAT_RULES}`,
   {
-    prompt: z.string().describe("La demande utilisateur décrivant la feature ou le besoin à spécifier"),
-    project_name: z.string().describe("Nom du projet concerné"),
+    prompt: z.string().describe("The user request describing the feature or need to specify"),
+    project_name: z.string().describe("Name of the project"),
   },
   async ({ prompt, project_name }) => {
     const now = new Date().toISOString()
@@ -62,35 +62,41 @@ ${FORMAT_RULES}`,
       content: [
         {
           type: "text",
-          text: `Génère un arbre de requirements JSON pour la demande suivante, puis appelle immédiatement render_requirements avec le résultat.
+          text: `Generate a requirements JSON tree for the following request, then immediately call render_requirements with the result.
 
-PROJET : ${project_name}
-DEMANDE : ${prompt}
+PROJECT: ${project_name}
+REQUEST: ${prompt}
 
-SCHÉMA JSON (obligatoire) :
+JSON SCHEMA (mandatory):
 {
   "version": "1.0",
   "project_name": "${project_name}",
-  "description": "<résumé de la feature en 1-2 phrases>",
+  "description": "<feature summary in 1-2 sentences>",
   "created_at": "${now}",
   "requirements": [
     {
       "key": "<PREFIX-NNN>",
-      "title": "<titre descriptif>",
+      "title": "<descriptive title>",
       "properties": [
-        { "label": "Description", "value": "<détail>" },
-        { "label": "Critères d'acceptation", "value": "<conditions>" },
-        { "label": "Priorité", "value": "Must | Should | Could | Won't" }
+        { "label": "Description", "value": "<detail>" },
+        { "label": "Acceptance criteria", "value": "<conditions>" },
+        { "label": "Priority", "value": "Must | Should | Could | Won't" }
       ],
-      "children": [ ...même structure récursive si besoin... ]
+      "children": [ ...same structure recursively if needed... ]
     }
   ]
 }
 
-ÉTAPES :
-1. Produis l'arbre JSON complet et valide.
-2. Appelle render_requirements(tree) — c'est lui qui génère le Markdown, ne pas l'écrire manuellement.
-3. Affiche le résultat et demande à l'utilisateur s'il veut affiner.`,
+KEY RULES:
+- Format: [A-Z]{2,8}-\\d{3} mandatory (e.g. WEBHOOK-001, AUTH-002)
+- Prefix = meaningful domain abbreviation (2-8 letters)
+- Sequential numbering, unique across the entire tree
+- Children may use a different prefix for a distinct domain
+
+STEPS:
+1. Produce the complete, valid JSON tree.
+2. Call render_requirements(tree) — it generates the Markdown, do not write it manually.
+3. Display the result and ask the user if they want to refine.`,
         },
       ],
     }
@@ -99,23 +105,23 @@ SCHÉMA JSON (obligatoire) :
 
 server.tool(
   "refine_requirements",
-  `Affine un arbre de requirements existant en appliquant le feedback utilisateur.
+  `Refines an existing requirements tree by applying user feedback.
 
-Deux types de modifications possibles :
+Two types of changes are possible:
 
-1. CONTENU des requirements (texte, propriétés, clés, structure) → modifier le JSON puis appeler render_requirements.
-2. ENRICHISSEMENT du document (ajouter du texte libre, blocs de code, listes, notes autour des tableaux) → peut être fait directement sur le Markdown après le rendu.
+1. REQUIREMENT CONTENT (text, properties, keys, structure) → modify the JSON then call render_requirements.
+2. DOCUMENT ENRICHMENT (adding free text, code blocks, lists, notes around the tables) → can be done directly on the Markdown after rendering.
 
 ${FORMAT_RULES}`,
   {
-    current_tree: z.record(z.string(), z.unknown()).describe("L'arbre de requirements actuel (objet JSON complet)"),
-    feedback: z.string().describe("Le feedback ou les modifications demandées par l'utilisateur"),
+    current_tree: z.record(z.string(), z.unknown()).describe("The current requirements tree (complete JSON object)"),
+    feedback: z.string().describe("The feedback or changes requested by the user"),
   },
   async ({ current_tree, feedback }) => {
     const validation = RequirementsTreeSchema.safeParse(current_tree)
     if (!validation.success) {
       return {
-        content: [{ type: "text", text: `Erreur : l'arbre fourni est invalide. ${validation.error.message}` }],
+        content: [{ type: "text", text: `Error: the provided tree is invalid. ${validation.error.message}` }],
         isError: true,
       }
     }
@@ -124,20 +130,20 @@ ${FORMAT_RULES}`,
       content: [
         {
           type: "text",
-          text: `Applique le feedback sur l'arbre de requirements.
+          text: `Apply the feedback to the requirements tree, then call render_requirements with the updated result.
 
-FEEDBACK : ${feedback}
+FEEDBACK: ${feedback}
 
-ARBRE ACTUEL :
+CURRENT TREE:
 ${JSON.stringify(current_tree, null, 2)}
 
-ÉTAPES :
-1. Si le feedback porte sur le contenu des requirements (texte, propriétés, structure, clés) :
-   → Modifie le JSON et appelle render_requirements(tree) pour régénérer le Markdown de base.
-   → Tu peux ensuite enrichir le Markdown (blocs de code, listes, notes) autour des tableaux si pertinent.
-2. Si le feedback porte uniquement sur l'enrichissement du document (ajouter un exemple, une note, du contexte) :
-   → Ajoute directement le contenu Markdown autour des tableaux existants, sans toucher au JSON.
-3. Dans tous les cas : les requirements restent dans leurs tableaux, jamais en texte libre.`,
+STEPS:
+1. If the feedback is about requirement content (text, properties, structure, keys):
+   → Modify the JSON and call render_requirements(tree) to regenerate the base Markdown.
+   → You may then enrich the Markdown (code blocks, lists, notes) around the tables if relevant.
+2. If the feedback is only about document enrichment (adding an example, a note, context):
+   → Add the Markdown content directly around the existing tables, without touching the JSON.
+3. In all cases: requirements must remain in their tables, never as free text.`,
         },
       ],
     }
@@ -146,13 +152,13 @@ ${JSON.stringify(current_tree, null, 2)}
 
 server.tool(
   "render_requirements",
-  `Convertit un arbre de requirements JSON en Markdown structuré avec des tableaux.
+  `Converts a requirements JSON tree into structured Markdown with tables.
 
-C'est le SEUL outil autorisé pour produire le Markdown des requirements.
-Le format des tableaux est imposé par le serveur et ne peut pas être modifié.
-Appeler après chaque analyze_prompt ou refine_requirements.`,
+This is the ONLY tool allowed to produce requirements Markdown.
+The table format is enforced server-side and cannot be changed.
+Must be called after every analyze_prompt or refine_requirements.`,
   {
-    tree: z.record(z.string(), z.unknown()).describe("L'arbre de requirements (objet JSON complet)"),
+    tree: z.record(z.string(), z.unknown()).describe("The requirements tree (complete JSON object)"),
   },
   async ({ tree }) => {
     try {
@@ -161,13 +167,13 @@ Appeler après chaque analyze_prompt ou refine_requirements.`,
         content: [
           {
             type: "text",
-            text: `Affiche le document suivant directement dans ta réponse (interprète le Markdown, ne le mets pas dans un bloc de code) :\n\n${markdown}\n\nDemande à l'utilisateur s'il veut affiner (via refine_requirements) ou valider pour envoyer (via submit_requirements).`,
+            text: `Display the following document directly in your response (render the Markdown, do not wrap it in a code block):\n\n${markdown}\n\nAsk the user if they want to refine (via refine_requirements) or submit (via submit_requirements).`,
           },
         ],
       }
     } catch (err) {
       return {
-        content: [{ type: "text", text: `Erreur de rendu : ${err instanceof Error ? err.message : String(err)}` }],
+        content: [{ type: "text", text: `Render error: ${err instanceof Error ? err.message : String(err)}` }],
         isError: true,
       }
     }
@@ -176,12 +182,12 @@ Appeler après chaque analyze_prompt ou refine_requirements.`,
 
 server.tool(
   "submit_requirements",
-  `Envoie le Markdown final à l'API backend pour générer la page de spécifications.
+  `Sends the final Markdown to the backend API to generate the specification page.
 
-Appelle ce tool uniquement quand l'utilisateur a confirmé qu'il est satisfait.
-Passe UNIQUEMENT le Markdown produit par render_requirements — jamais du Markdown écrit manuellement.`,
+Only call this tool once the user has confirmed they are satisfied.
+Pass ONLY the Markdown produced by render_requirements — never hand-written Markdown.`,
   {
-    markdown: z.string().describe("Le contenu Markdown produit par render_requirements"),
+    markdown: z.string().describe("The Markdown content produced by render_requirements"),
   },
   async ({ markdown }) => {
     const result = await submitMarkdown(markdown)
