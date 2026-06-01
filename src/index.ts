@@ -154,9 +154,9 @@ server.tool(
   "render_requirements",
   `Converts a requirements JSON tree into structured Markdown with tables.
 
-This is the ONLY tool allowed to produce requirements Markdown.
 The table format is enforced server-side and cannot be changed.
-Must be called after every analyze_prompt or refine_requirements.`,
+Call after analyze_prompt or refine_requirements to get the base Markdown.
+After rendering, the Markdown may be freely enriched (notes, examples, code blocks around the tables) without re-calling this tool.`,
   {
     tree: z.record(z.string(), z.unknown()).describe("The requirements tree (complete JSON object)"),
   },
@@ -185,7 +185,7 @@ server.tool(
   `Sends the final Markdown to the backend API to generate the specification page.
 
 Only call this tool once the user has confirmed they are satisfied.
-Pass ONLY the Markdown produced by render_requirements — never hand-written Markdown.`,
+Pass the current Markdown document exactly as it appears — including any enrichments or modifications made after render_requirements was called. Do NOT re-call render_requirements before submitting.`,
   {
     markdown: z.string().describe("The Markdown content produced by render_requirements"),
   },

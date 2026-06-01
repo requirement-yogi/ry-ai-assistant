@@ -17,7 +17,7 @@ export const SUBMIT_TOOL = {
   description: `Sends the final Markdown document to the backend API to generate the specification page.
 
 Only call this tool once the user has confirmed they are satisfied with the Markdown preview.
-Pass the Markdown content produced by render_requirements (optionally enriched).`,
+Pass the current Markdown document exactly as displayed — including any enrichments or modifications made after render_requirements was called.`,
 } as const
 
 export async function submitMarkdown(markdown: string): Promise<{ success: boolean; message: string }> {
