@@ -1,28 +1,51 @@
-import { RequirementsTreeSchema, type RequirementsTree } from "../schemas/requirements.js"
+import { z } from "zod"
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
+import { RequirementsTreeSchema } from "../schemas/requirements.js"
 
-export const REFINE_TOOL = {
-  name: "refine_requirements",
-  description: `Refines an existing requirements tree by applying user feedback.
+export function registerRefineTool(server: McpServer) {
+  server.registerTool(
+    "refine_requirements",
+    {
+      description: `Refines an existing requirements tree by applying user feedback.
 
-Receives the current tree (current_tree) and the user's feedback.
-Modifies the tree accordingly: add, remove, rephrase, or reorganize requirements.
-Returns ONLY the complete, valid, updated JSON tree.`,
-  inputSchema: {
-    type: "object",
-    properties: {
-      current_tree: {
-        type: "object",
-        description: "The current requirements tree (complete JSON object)",
-      },
-      feedback: {
-        type: "string",
-        description: "The feedback or changes requested by the user",
+Two types of changes are possible:
+
+1. REQUIREMENT CONTENT (text, properties, keys, structure) → modify the JSON then call render_requirements.
+2. DOCUMENT ENRICHMENT (adding free text, notes, context around requirements) → can be done directly on the Markdown after rendering, without touching the JSON.`,
+      inputSchema: {
+        current_tree: z.record(z.string(), z.unknown()).describe("The current requirements tree (complete JSON object)"),
+        feedback: z.string().describe("The feedback or changes requested by the user"),
       },
     },
-    required: ["current_tree", "feedback"],
-  },
-} as const
+    async ({ current_tree, feedback }) => {
+      const validation = RequirementsTreeSchema.safeParse(current_tree)
+      if (!validation.success) {
+        return {
+          content: [{ type: "text", text: `Error: the provided tree is invalid. ${validation.error.message}` }],
+          isError: true,
+        }
+      }
 
-export function validateTree(raw: unknown): RequirementsTree {
-  return RequirementsTreeSchema.parse(raw)
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Apply the feedback to the requirements tree, then call render_requirements with the updated result.
+
+FEEDBACK: ${feedback}
+
+CURRENT TREE:
+${JSON.stringify(current_tree, null, 2)}
+
+STEPS:
+1. If the feedback is about requirement content (text, properties, structure, keys):
+   → Modify the JSON and call render_requirements(tree) to regenerate the Markdown.
+2. If the feedback is only about document enrichment (adding an example, a note, context):
+   → Add the Markdown content directly around the existing requirements, without touching the JSON.
+3. In all cases: every requirement must keep its \`req:KEY\` tag in a valid context (paragraph, heading, or table cell).`,
+          },
+        ],
+      }
+    }
+  )
 }
