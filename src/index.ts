@@ -2,41 +2,53 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod"
 import { RequirementsTreeSchema } from "./schemas/requirements.js"
-import { validateAndRender } from "./tools/render.js"
-import { submitMarkdown } from "./tools/submit.js"
+import { mdToAdf } from "./tools/md-to-adf.js"
 
 const server = new McpServer({
   name: "prompt2requirements",
   version: "1.0.0",
 })
 
-// Format rules shared across tools — injected into instructions
+// Indexing rules injected into render_requirements — the LLM must follow these exactly
 const FORMAT_RULES = `
-REQUIREMENT FORMAT RULES:
-Every requirement must always appear in a table. This is mandatory for downstream parsing (Confluence, other apps).
+REQUIREMENT INDEXING RULES — MANDATORY:
 
-VERTICAL table (parent requirement):
-  | | |
-  | :--- | :--- |
-  | **Key** | PREFIX-001 |         ← 1st row: the requirement key
-  | **Title** | Descriptive title | ← 2nd row: the title
-  | **Prop** | value |              ← following rows: properties
+Every requirement must appear in the Markdown with a \`req:KEY\` tag (e.g. \`req:AUTH-001\`).
+The backtick notation is both the visual marker and what the backend parser looks for.
 
-HORIZONTAL table (child requirements):
-  | Key | Title | Prop1 | Prop2 |   ← 1st col: key, 2nd: title, rest: properties
-  | :--- | :--- | :--- | :--- |
-  | PREFIX-001 | Title | ... | ... |
+Three valid contexts for a \`req:KEY\` tag:
 
-Outside of requirement tables, Markdown is free:
-you may add code blocks, lists, notes, examples, callouts, intro text, etc.
-These elements enrich the document without breaking requirement parsing.
+1. Paragraph — requirement with a full textual description:
+   \`req:KEY\` The system shall... Priority: HIGH. Status: Draft.
 
-What is forbidden: taking a requirement out of its table (free text, standalone heading, list item, etc.).
-What is allowed: adding any free Markdown content around the tables.`
+2. Heading — requirement that titles a section detailed below:
+   ## \`req:KEY\` — Section Title
 
-server.tool(
+3. Table cell — requirements that share a common structure:
+   | Key | Description | Priority |
+   |---|---|---|
+   | \`req:KEY\` | Description | HIGH |
+
+STRICT RULES:
+- Each KEY appears exactly once — never repeat the same \`req:KEY\` in multiple places.
+- Only the three contexts above are parsed; tags inside blockquotes, code blocks, or list items are ignored.
+- Do NOT place a requirement outside one of these three contexts.
+
+FREEDOM:
+Outside these constraints, the document structure is entirely your choice.
+Use headings, sections, tables, prose — whatever layout best communicates this specific requirement tree.`
+
+server.registerTool(
   "analyze_prompt",
-  `Analyzes a user prompt and produces a structured requirements tree in JSON format.
+  {
+    description: `USE THIS TOOL when the user wants to write, create, specify, or document requirements for a software feature or project.
+This is the entry point of the requirements workflow: analyze_prompt → render_requirements → submit_requirements.
+
+This MCP handles the requirements-specific work: structuring the tree, formatting the document, and generating
+the ADF body with Requirement Yogi inline macros for each requirement.
+The actual Confluence page creation is then handled by other available tools (e.g. Atlassian MCP).
+
+Analyzes the user's request and produces a structured requirements tree in JSON format.
 
 Break down the request into hierarchical requirements (2 to 4 levels depending on complexity).
 
@@ -49,12 +61,11 @@ KEY FORMAT RULES:
 - Mandatory format: [A-Z]{2,8}-\\d{3} (e.g. WEBHOOK-001, AUTH-002)
 - Prefix = meaningful abbreviation of the requirement domain (2-8 uppercase letters)
 - Sequential numbering, unique across the entire tree
-- Children may use a different prefix if their domain differs
-
-${FORMAT_RULES}`,
-  {
-    prompt: z.string().describe("The user request describing the feature or need to specify"),
-    project_name: z.string().describe("Name of the project"),
+- Children may use a different prefix if their domain differs`,
+    inputSchema: {
+      prompt: z.string().describe("The user request describing the feature or need to specify"),
+      project_name: z.string().describe("Name of the project"),
+    },
   },
   async ({ prompt, project_name }) => {
     const now = new Date().toISOString()
@@ -103,19 +114,19 @@ STEPS:
   }
 )
 
-server.tool(
+server.registerTool(
   "refine_requirements",
-  `Refines an existing requirements tree by applying user feedback.
+  {
+    description: `Refines an existing requirements tree by applying user feedback.
 
 Two types of changes are possible:
 
 1. REQUIREMENT CONTENT (text, properties, keys, structure) → modify the JSON then call render_requirements.
-2. DOCUMENT ENRICHMENT (adding free text, code blocks, lists, notes around the tables) → can be done directly on the Markdown after rendering.
-
-${FORMAT_RULES}`,
-  {
-    current_tree: z.record(z.string(), z.unknown()).describe("The current requirements tree (complete JSON object)"),
-    feedback: z.string().describe("The feedback or changes requested by the user"),
+2. DOCUMENT ENRICHMENT (adding free text, notes, context around requirements) → can be done directly on the Markdown after rendering, without touching the JSON.`,
+    inputSchema: {
+      current_tree: z.record(z.string(), z.unknown()).describe("The current requirements tree (complete JSON object)"),
+      feedback: z.string().describe("The feedback or changes requested by the user"),
+    },
   },
   async ({ current_tree, feedback }) => {
     const validation = RequirementsTreeSchema.safeParse(current_tree)
@@ -139,61 +150,116 @@ ${JSON.stringify(current_tree, null, 2)}
 
 STEPS:
 1. If the feedback is about requirement content (text, properties, structure, keys):
-   → Modify the JSON and call render_requirements(tree) to regenerate the base Markdown.
-   → You may then enrich the Markdown (code blocks, lists, notes) around the tables if relevant.
+   → Modify the JSON and call render_requirements(tree) to regenerate the Markdown.
 2. If the feedback is only about document enrichment (adding an example, a note, context):
-   → Add the Markdown content directly around the existing tables, without touching the JSON.
-3. In all cases: requirements must remain in their tables, never as free text.`,
+   → Add the Markdown content directly around the existing requirements, without touching the JSON.
+3. In all cases: every requirement must keep its \`req:KEY\` tag in a valid context (paragraph, heading, or table cell).`,
         },
       ],
     }
   }
 )
 
-server.tool(
+server.registerTool(
   "render_requirements",
-  `Converts a requirements JSON tree into structured Markdown with tables.
-
-The table format is enforced server-side and cannot be changed.
-Call after analyze_prompt or refine_requirements to get the base Markdown.
-After rendering, the Markdown may be freely enriched (notes, examples, code blocks around the tables) without re-calling this tool.`,
   {
-    tree: z.record(z.string(), z.unknown()).describe("The requirements tree (complete JSON object)"),
+    description: `Validates the requirements tree and instructs the LLM to generate the Markdown document.
+
+The LLM chooses the layout that best represents the specific tree (headings, tables, prose, etc.).
+Every requirement must include a \`req:KEY\` tag so the backend can parse and index it.
+
+Call after analyze_prompt or refine_requirements.`,
+    inputSchema: {
+      tree: z.record(z.string(), z.unknown()).describe("The requirements tree (complete JSON object)"),
+    },
   },
   async ({ tree }) => {
-    try {
-      const markdown = validateAndRender(tree)
+    const validation = RequirementsTreeSchema.safeParse(tree)
+    if (!validation.success) {
       return {
-        content: [
-          {
-            type: "text",
-            text: `Display the following document directly in your response (render the Markdown, do not wrap it in a code block):\n\n${markdown}\n\nAsk the user if they want to refine (via refine_requirements) or submit (via submit_requirements).`,
-          },
-        ],
-      }
-    } catch (err) {
-      return {
-        content: [{ type: "text", text: `Render error: ${err instanceof Error ? err.message : String(err)}` }],
+        content: [{ type: "text", text: `Validation error: ${validation.error.message}` }],
         isError: true,
       }
+    }
+
+    const { project_name, description, created_at, requirements } = validation.data
+    const date = new Date(created_at).toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    })
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Generate a Markdown requirements document for the tree below.
+You have full freedom over the document layout — choose the structure that best communicates this specific tree.
+Follow the indexing rules exactly so the backend can parse and index each requirement.
+
+PROJECT: ${project_name}
+DESCRIPTION: ${description}
+DATE: ${date}
+
+JSON TREE:
+${JSON.stringify(requirements, null, 2)}
+
+${FORMAT_RULES}
+
+Display the generated Markdown directly in your response (render it, do not wrap in a code block).
+Then ask the user if they want to refine (via refine_requirements) or submit (via submit_requirements).`,
+        },
+      ],
     }
   }
 )
 
-server.tool(
+server.registerTool(
   "submit_requirements",
-  `Sends the final Markdown to the backend API to generate the specification page.
-
-Only call this tool once the user has confirmed they are satisfied.
-Pass the current Markdown document exactly as it appears — including any enrichments or modifications made after render_requirements was called. Do NOT re-call render_requirements before submitting.`,
   {
-    markdown: z.string().describe("The Markdown content produced by render_requirements"),
+    description: `Converts the final Markdown document into an Atlassian Document Format (ADF) body with Requirement Yogi inline macros.
+
+The conversion is done server-side: each \`req:KEY\` tag becomes a properly structured inlineExtension macro.
+The resulting ADF is then ready to be published using other available tools (e.g. Atlassian MCP createConfluencePage).
+
+Only call this tool once the user has confirmed they are satisfied with the document.`,
+    inputSchema: {
+      markdown: z.string().describe("The Markdown document produced by render_requirements"),
+    },
   },
   async ({ markdown }) => {
-    const result = await submitMarkdown(markdown)
+    const adf = mdToAdf(markdown)
+
+    const titleMatch = markdown.match(/^#\s+(.+)$/m)
+    const title = titleMatch ? titleMatch[1].trim() : "Requirements"
+
+    const adfString = JSON.stringify(adf)
+
     return {
-      content: [{ type: "text", text: result.message }],
-      isError: !result.success,
+      content: [
+        {
+          type: "text",
+          text: `The Markdown has been converted to Atlassian Document Format (ADF).
+Page title: "${title}"
+
+ADF (JSON string, ready to pass as \`body\`):
+${adfString}
+
+NEXT STEP:
+
+Option A — Confluence MCP tools available (e.g. createConfluencePage):
+  Call createConfluencePage with:
+    - title: "${title}"
+    - body: <the ADF JSON string above>
+    - contentFormat: "adf"
+    - cloudId: ask the user if unknown
+    - spaceId: ask the user if unknown
+    - parentId: ask the user if they want to nest the page
+
+Option B — No Confluence tools available:
+  Provide the ADF JSON as a downloadable file named "requirements.adf.json" for the user.`,
+        },
+      ],
     }
   }
 )
