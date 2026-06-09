@@ -1,9 +1,10 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
-import { registerAnalyzeTool } from "./tools/analyze.js"
-import { registerRefineTool } from "./tools/refine.js"
-import { registerRenderTool } from "./tools/render.js"
-import { registerSubmitTool } from "./tools/submit.js"
+import {McpServer} from "@modelcontextprotocol/sdk/server/mcp.js"
+import {StdioServerTransport} from "@modelcontextprotocol/sdk/server/stdio.js"
+import {registerAnalyzeTool} from "./tools/analyze.js"
+import {registerRefineTool} from "./tools/refine.js"
+import {registerRenderTool} from "./tools/render.js"
+import {registerSubmitTool} from "./tools/submit.js"
+import {registerBreakdownTool} from "./tools/breakdownToJira.js"
 
 const server = new McpServer({
     name: "ry-ai-assistant",
@@ -14,6 +15,7 @@ registerAnalyzeTool(server)
 registerRefineTool(server)
 registerRenderTool(server)
 registerSubmitTool(server)
+registerBreakdownTool(server)
 
 const transport = new StdioServerTransport()
 await server.connect(transport)
