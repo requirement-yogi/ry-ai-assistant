@@ -1,6 +1,6 @@
 import { z } from "zod"
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
-import { mdToAdf } from "./md-to-adf.js"
+import { mdToAdf } from "./mdToAdf.js"
 
 const EXTENSION_TYPE = "com.atlassian.ecosystem"
 const EXTENSION_KEY =
