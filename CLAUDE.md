@@ -1,4 +1,4 @@
-# Prompt2Requirements — MCP Server
+# RY AI Assistant — MCP Server
 
 ## What this project does
 

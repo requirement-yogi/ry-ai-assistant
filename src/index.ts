@@ -6,8 +6,8 @@ import { registerRenderTool } from "./tools/render.js"
 import { registerSubmitTool } from "./tools/submit.js"
 
 const server = new McpServer({
-  name: "prompt2requirements",
-  version: "1.0.0",
+    name: "ry-ai-assistant",
+    version: "0.1.0",
 })
 
 registerAnalyzeTool(server)
