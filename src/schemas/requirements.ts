@@ -7,8 +7,10 @@ export const PropertySchema = z.object({
 
 export const RequirementNodeSchema: z.ZodType<RequirementNode> = z.lazy(() =>
   z.object({
-    key: z.string().regex(/^[A-Z]{2,8}-\d{3}$/, "Expected format: PREFIX-NNN (e.g. WEBHOOK-001)"),
-    title: z.string(),
+    // Free-form key chosen by the user — no imposed format. A node WITHOUT a key
+    // is a pure section (rendered as a heading, no macro).
+    key: z.string().min(1).optional(),
+    description: z.string(),
     properties: z.array(PropertySchema).default([]),
     children: z.array(RequirementNodeSchema).default([]),
   })
@@ -24,9 +26,9 @@ export const RequirementsTreeSchema = z.object({
 
 export type Property = z.infer<typeof PropertySchema>
 export type RequirementNode = {
-  key: string   // identifier: format [A-Z]{2,8}-\d{3}, e.g. WEBHOOK-001
-  title: string // descriptive text, e.g. "Coffee brewing webhook"
-  properties: Property[]
+  key?: string            // free-form identifier; absent on section nodes
+  description: string     // col 2 in a table, text after the macro in a paragraph, heading text
+  properties: Property[]  // extra table columns only (empty for paragraph/heading contexts)
   children: RequirementNode[]
 }
 export type RequirementsTree = z.infer<typeof RequirementsTreeSchema>
