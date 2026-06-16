@@ -51,10 +51,6 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
     "ry-ai-assistant": {
       "command": "node",
       "args": ["/path/to/ry-ai-assistant.mjs"],
-      "env": {
-        "API_BASE_URL": "https://your-instance.com",
-        "API_ACCESS_TOKEN": "ryc_v1_your_token_here"
-      }
     }
   }
 }
@@ -73,10 +69,6 @@ Edit `%APPDATA%\Claude\claude_desktop_config.json`:
     "ry-ai-assistant": {
       "command": "node",
       "args": ["C:\\path\\to\\ry-ai-assistant.mjs"],
-      "env": {
-        "API_BASE_URL": "https://your-instance.com",
-        "API_ACCESS_TOKEN": "ryc_v1_your_token_here"
-      }
     }
   }
 }
@@ -95,10 +87,6 @@ Edit `~/.config/Claude/claude_desktop_config.json`:
     "ry-ai-assistant": {
       "command": "node",
       "args": ["/path/to/ry-ai-assistant.mjs"],
-      "env": {
-        "API_BASE_URL": "https://your-instance.com",
-        "API_ACCESS_TOKEN": "ryc_v1_your_token_here"
-      }
     }
   }
 }
@@ -117,14 +105,10 @@ Add the server to your project or global config:
 ```bash
 # Project-level (creates .claude/mcp.json)
 claude mcp add ry-ai-assistant \
-  -e API_BASE_URL=https://your-instance.com \
-  -e API_ACCESS_TOKEN=ryc_v1_your_token_here \
   -- node /path/to/ry-ai-assistant.mjs
 
 # Or global
 claude mcp add --global ry-ai-assistant \
-  -e API_BASE_URL=https://your-instance.com \
-  -e API_ACCESS_TOKEN=ryc_v1_your_token_here \
   -- node /path/to/ry-ai-assistant.mjs
 ```
 
@@ -140,10 +124,6 @@ Open **Settings → MCP** (or edit `~/.cursor/mcp.json` on macOS/Linux, `%APPDAT
     "ry-ai-assistant": {
       "command": "node",
       "args": ["/path/to/ry-ai-assistant.mjs"],
-      "env": {
-        "API_BASE_URL": "https://your-instance.com",
-        "API_ACCESS_TOKEN": "ryc_v1_your_token_here"
-      }
     }
   }
 }
@@ -162,10 +142,6 @@ Edit `.vscode/mcp.json` in your workspace, or your user `settings.json` under `"
       "type": "stdio",
       "command": "node",
       "args": ["/path/to/ry-ai-assistant.mjs"],
-      "env": {
-        "API_BASE_URL": "https://your-instance.com",
-        "API_ACCESS_TOKEN": "ryc_v1_your_token_here"
-      }
     }
   }
 }
@@ -182,7 +158,6 @@ Use these values:
 | Transport | `stdio` |
 | Command | `node` |
 | Args | `["/path/to/ry-ai-assistant.mjs"]` |
-| Env | `API_BASE_URL`, `API_ACCESS_TOKEN` |
 
 ## License
 
