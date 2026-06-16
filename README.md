@@ -50,7 +50,7 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
   "mcpServers": {
     "ry-ai-assistant": {
       "command": "node",
-      "args": ["/path/to/ry-ai-assistant.mjs"],
+      "args": ["/path/to/ry-ai-assistant.mjs"]
     }
   }
 }
@@ -68,7 +68,7 @@ Edit `%APPDATA%\Claude\claude_desktop_config.json`:
   "mcpServers": {
     "ry-ai-assistant": {
       "command": "node",
-      "args": ["C:\\path\\to\\ry-ai-assistant.mjs"],
+      "args": ["C:\\path\\to\\ry-ai-assistant.mjs"]
     }
   }
 }
@@ -86,7 +86,7 @@ Edit `~/.config/Claude/claude_desktop_config.json`:
   "mcpServers": {
     "ry-ai-assistant": {
       "command": "node",
-      "args": ["/path/to/ry-ai-assistant.mjs"],
+      "args": ["/path/to/ry-ai-assistant.mjs"]
     }
   }
 }
@@ -123,7 +123,7 @@ Open **Settings → MCP** (or edit `~/.cursor/mcp.json` on macOS/Linux, `%APPDAT
   "mcpServers": {
     "ry-ai-assistant": {
       "command": "node",
-      "args": ["/path/to/ry-ai-assistant.mjs"],
+      "args": ["/path/to/ry-ai-assistant.mjs"]
     }
   }
 }
@@ -141,7 +141,7 @@ Edit `.vscode/mcp.json` in your workspace, or your user `settings.json` under `"
     "ry-ai-assistant": {
       "type": "stdio",
       "command": "node",
-      "args": ["/path/to/ry-ai-assistant.mjs"],
+      "args": ["/path/to/ry-ai-assistant.mjs"]
     }
   }
 }
