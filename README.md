@@ -8,7 +8,6 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that l
 
 ## Prerequisites
 
-- A [Requirement Yogi - REST API](https://docs.requirementyogi.com/cloud/rest-apis) account with API credentials
 - An MCP-compatible LLM client (see [Connecting your client](#connecting-your-client) below)
 - (Optional) [Node.js](https://nodejs.org) 18 or later
 - (Optional) npm (bundled with Node.js)
