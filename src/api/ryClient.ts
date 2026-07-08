@@ -281,6 +281,173 @@ export async function listAllRelationships(applicationId?: number): Promise<unkn
   return fetchAllStandalonePages(path, RELATIONSHIPS_PAGE_SIZE)
 }
 
+// --- Schema grounding: list_searchable_fields -------------------------------------------------
+//
+// Returns the REAL identifiers of a space so the LLM never invents field/property/relationship
+// names. It is built ONLY from confirmed endpoints: the relationship names from /relationships
+// (standalone API), and everything else aggregated from a bounded sample of the space's own
+// requirements via /rest/search (Confluence API). No metadata endpoint is assumed. Categories we
+// cannot yet resolve from those two sources (dedicated variants/baselines/rules/jira-project
+// endpoints are unconfirmed) are returned as whatever the sampled requirements expose, best-effort.
+
+// Cap how many requirements we inspect: distinct identifiers converge fast, and this tool must
+// stay cheap enough to call speculatively before searching.
+const SCHEMA_SAMPLE_MAX = 1000
+
+export type SearchableFields = {
+  space: string
+  properties: string[]
+  external_properties: string[]
+  relationships: string[]
+  variants: string[]
+  baselines: string[]
+  rules: string[]
+  jira_projects: string[]
+  sampled: number
+  notes: string[]
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : undefined
+}
+
+function stringField(record: Record<string, unknown>, ...names: string[]): string | undefined {
+  for (const name of names) {
+    const value = record[name]
+    if (typeof value === "string" && value.trim()) return value.trim()
+  }
+  return undefined
+}
+
+// A requirement property may be shaped as { label | name, value, external?, type? }. Collect its
+// identifier; classify as external (ext@) when the entry advertises it, otherwise plain (@).
+function collectProperties(req: Record<string, unknown>, plain: Set<string>, external: Set<string>): void {
+  const properties = req.properties
+  if (!Array.isArray(properties)) return
+  for (const entry of properties) {
+    const record = asRecord(entry)
+    if (!record) continue
+    const label = stringField(record, "label", "name", "key")
+    if (!label) continue
+    const isExternal = record.external === true || record.isExternal === true || record.ext === true
+    ;(isExternal ? external : plain).add(label)
+  }
+}
+
+// Variant, baseline, jira project and rule identifiers are extracted defensively — the DTO may or
+// may not expose them, and we never fail the tool if a shape is missing.
+function collectNamed(value: unknown, into: Set<string>, ...names: string[]): void {
+  const record = asRecord(value)
+  if (record) {
+    const name = stringField(record, ...names)
+    if (name) into.add(name)
+  } else if (typeof value === "string" && value.trim()) {
+    into.add(value.trim())
+  }
+}
+
+function collectJiraProjects(req: Record<string, unknown>, into: Set<string>): void {
+  for (const field of ["jiraLinks", "links", "jira", "jiraIssues"]) {
+    const list = req[field]
+    if (!Array.isArray(list)) continue
+    for (const entry of list) {
+      const record = asRecord(entry)
+      if (record) collectNamed(record, into, "projectKey", "project", "projectName")
+    }
+  }
+}
+
+function collectRules(req: Record<string, unknown>, into: Set<string>): void {
+  for (const field of ["ruleStatuses", "rules", "ruleResults"]) {
+    const list = req[field]
+    if (!Array.isArray(list)) continue
+    for (const entry of list) collectNamed(entry, into, "rule", "ruleName", "label", "name")
+  }
+}
+
+// Names of every relationship the token can see; these enable from@/to@/parent@/child@/jira@<name>.
+async function relationshipNames(applicationId?: number): Promise<string[]> {
+  const relationships = await listAllRelationships(applicationId)
+  const names = new Set<string>()
+  for (const relationship of relationships) {
+    const record = asRecord(relationship)
+    if (record) collectNamed(record, names, "name", "label")
+  }
+  return [...names]
+}
+
+export async function listSearchableFields(
+  spaceKey: string,
+  applicationId?: number,
+  instanceBaseUrl?: string
+): Promise<SearchableFields> {
+  const notes: string[] = []
+  const properties = new Set<string>()
+  const external = new Set<string>()
+  const variants = new Set<string>()
+  const baselines = new Set<string>()
+  const rules = new Set<string>()
+  const jiraProjects = new Set<string>()
+  let relationships: string[] = []
+  let sampled = 0
+
+  // Relationship names come from a different API (standalone) with its own auth — keep it isolated
+  // so a failure there (e.g. applicationId required) doesn't sink the property discovery.
+  try {
+    relationships = await relationshipNames(applicationId)
+  } catch (error) {
+    notes.push(`Could not list relationships (${(error as Error).message}). Call list_relationships separately.`)
+  }
+
+  // `key ~ '%'` matches every requirement (each has a key), which is exactly the sample we want;
+  // spaceKey scopes it. Bounded by SCHEMA_SAMPLE_MAX so a big space stays cheap.
+  let offset = 0
+  for (;;) {
+    const page = asRecord(await searchRequirements({ query: "key ~ '%'", spaceKey, offset, instanceBaseUrl }))
+    const results = page && Array.isArray(page.results) ? (page.results as unknown[]) : []
+    for (const result of results) {
+      const req = asRecord(result)
+      if (!req) continue
+      sampled++
+      collectProperties(req, properties, external)
+      collectNamed(req.variant ?? req.variantName, variants, "name", "label")
+      collectNamed(req.baseline ?? req.baselineName, baselines, "name", "label")
+      collectJiraProjects(req, jiraProjects)
+      collectRules(req, rules)
+    }
+    const hasNext = page?.hasNext === true
+    offset += results.length
+    if (!hasNext || results.length === 0 || sampled >= SCHEMA_SAMPLE_MAX) {
+      if (hasNext && sampled >= SCHEMA_SAMPLE_MAX) {
+        notes.push(`Property/variant lists sampled from the first ${sampled} requirements; rarely-used ones may be missing.`)
+      }
+      break
+    }
+  }
+
+  if (variants.size === 0) {
+    notes.push("No variant names surfaced from the sample; every space still has a default variant 'Current'.")
+  }
+  if (baselines.size === 0 && rules.size === 0 && jiraProjects.size === 0) {
+    notes.push(
+      "Baselines, rule labels and Jira projects were not exposed by the sampled requirements — treat those as best-effort and confirm names with the user if needed."
+    )
+  }
+
+  return {
+    space: spaceKey,
+    properties: [...properties].sort(),
+    external_properties: [...external].sort(),
+    relationships: relationships.sort(),
+    variants: [...variants].sort(),
+    baselines: [...baselines].sort(),
+    rules: [...rules].sort(),
+    jira_projects: [...jiraProjects].sort(),
+    sampled,
+    notes,
+  }
+}
+
 // POST /rest/jira-bulk/links on the Confluence API: links a selection of
 // requirements to a set of Jira issues (numeric IDs) with one relationship.
 export async function createJiraLinks(link: JiraBulkLink, instanceBaseUrl?: string): Promise<unknown> {

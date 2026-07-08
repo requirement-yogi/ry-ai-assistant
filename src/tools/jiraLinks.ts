@@ -4,6 +4,7 @@ import {
   listOrganizations,
   listApplications,
   searchRequirements,
+  listSearchableFields,
   listAllRelationships,
   createJiraLinks,
   type JiraBulkLink,
@@ -76,15 +77,19 @@ function summarizeSearchPage(page: unknown): unknown {
     return page
   }
   const record = page as Record<string, unknown>
+  const requirements = (record.results as unknown[]).map(summarizeRequirement)
   return {
+    // Lead with the total: discovery is iterative and the model needs the volume to judge whether
+    // the query is too broad or too narrow before drilling into the returned page.
+    total_count: typeof record.total === "number" ? record.total : requirements.length,
+    returned: requirements.length,
     offset: record.offset,
     limit: record.limit,
-    total: record.total,
     hasNext: record.hasNext,
     // How the server understood the query, and any warnings — useful to double-check it.
     ...(record.humanReadable != null ? { humanReadable: record.humanReadable } : {}),
     ...(record.messageBean != null ? { messageBean: record.messageBean } : {}),
-    requirements: (record.results as unknown[]).map(summarizeRequirement),
+    requirements,
   }
 }
 
@@ -213,13 +218,72 @@ Keep the application IDs (jira_application_id) and base URLs (base_url) for the 
   )
 
   server.registerTool(
+    "list_searchable_fields",
+    {
+      description: `USE THIS TOOL to discover the REAL searchable identifiers of a Confluence space before you write an RQL query. CALL THIS FIRST whenever you are not sure which fields, properties or relationships a space actually has — it is what prevents you from inventing names that don't exist.
+
+Returns JSON with, for the given space:
+- properties: the requirement property names → use as @Name (e.g. @Priority).
+- external_properties: typed/external property names → use as ext@Name (support > >= < <=).
+- relationships: relationship names → use as from@Name / to@Name / parent@Name / child@Name / jira@Name.
+- variants, baselines, rules, jira_projects: names for variant/baseline/ruleStatus@/project conditions (best-effort — see notes).
+- sampled: how many requirements were inspected; notes: caveats.
+
+Escape spaces in a name with a backslash when writing the query (e.g. @Main\\ Category). Build the query with search_requirements using ONLY the identifiers returned here (plus the always-available core fields: key, text, page, status, jira…).
+
+${WORKFLOW}`,
+      inputSchema: {
+        space: z.string().min(1).describe("The Confluence space key whose searchable fields you want"),
+        application_id: z
+          .number()
+          .int()
+          .optional()
+          .describe(
+            "RY application identifier for the relationships lookup; required unless the token is already scoped to one application"
+          ),
+        base_url: z
+          .string()
+          .optional()
+          .describe(
+            "Base URL of the Confluence instance (from list_applications); only needed when several Confluence instances are connected"
+          ),
+      },
+    },
+    async ({ space, application_id, base_url }) => {
+      try {
+        const fields = await listSearchableFields(space, application_id, base_url)
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Searchable fields for space "${space}" (JSON from the Requirement Yogi API):
+${JSON.stringify(fields)}
+
+Use ONLY these identifiers when writing the query for search_requirements (plus the core fields key/text/page/status/jira). Prefix them per the syntax: @property, ext@property, from@/to@/jira@relationship.`,
+            },
+          ],
+        }
+      } catch (error) {
+        return {
+          content: [{ type: "text", text: `list_searchable_fields failed: ${(error as Error).message}` }],
+          isError: true,
+        }
+      }
+    }
+  )
+
+  server.registerTool(
     "search_requirements",
     {
       description: `USE THIS TOOL when the user wants to find their Requirement Yogi requirements, typically as the first step of linking them to Jira issues.
 
-Searches the requirements through the Requirement Yogi API. Each result is trimmed to the linking essentials: id, key, text, applicationId, containerId, variantId, status, canonicalURL, properties. Keep the id and the containerId/variantId: link_requirements_to_jira needs them. The response also echoes how the server understood the query (humanReadable) and any warnings (messageBean) — check them if the results look off.
+Searches the requirements through the Requirement Yogi API. Returns { total_count, returned, requirements: [...first page...] } — never a raw list. total_count is the FULL number of matches (the requirements array is just the current page): use it to judge whether the query is too broad (refine/add conditions) or too narrow (loosen it) before drilling in. Discovery is iterative — expect to run several queries. Each requirement is trimmed to the linking essentials: id, key, text, applicationId, containerId, variantId, status, canonicalURL, properties. Keep the id and the containerId/variantId: link_requirements_to_jira needs them. The response also echoes how the server understood the query (humanReadable) and any warnings (messageBean).
 
-YOU write the query: translate the user's request into the Requirement Yogi search syntax using the reference below. Results are paginated by 200: if hasNext is true, call again with offset = offset + limit.
+YOU write the query: translate the user's request into the Requirement Yogi RQL search syntax using the reference below. Results are paginated by 200: if hasNext is true, call again with offset = offset + limit.
+
+GROUNDING: to avoid inventing field/property/relationship/variant names, call list_searchable_fields(space) FIRST whenever you are not certain which identifiers a space actually has.
+
+SELF-CORRECTION: if the query has a syntax error the tool returns the server's RQL parse error verbatim (e.g. "Syntax error at position N: ..."). Read it, fix the query, and resubmit.
 
 CRITICAL: the query is a structured "field operator value" expression, never a free-text search box. A bare key or word is invalid — e.g. to find requirement BREW-F-01 send key = 'BREW-F-01', NOT BREW-F-01 on its own. When no field is specified, default to \`key\`.
 
@@ -253,14 +317,22 @@ ${WORKFLOW}`,
               text: `Requirements found (JSON from the Requirement Yogi API):
 ${JSON.stringify(summarizeSearchPage(page))}
 
+total_count is the full number of matches; requirements is just this page. If it's too broad or too narrow, refine the query and search again.
 Keep each requirement's id and its containerId/variantId: link_requirements_to_jira needs them.
 If hasNext is true, call search_requirements again with offset = offset + limit for the next page.`,
             },
           ],
         }
       } catch (error) {
+        // Relay parse errors VERBATIM (the RY API answers a bad query with 400 + "Syntax error at
+        // position N: ...") so the model can correct the RQL and resubmit — never mask it.
+        const message = (error as Error).message
+        const looksLikeParseError = /\b400\b|syntax error|parse|position \d/i.test(message)
+        const guidance = looksLikeParseError
+          ? "The query could not be parsed. Read the syntax error above, fix the RQL query, and call search_requirements again. If unsure which fields/properties exist, call list_searchable_fields(space) first."
+          : "Search failed for a non-syntax reason (auth, connectivity, or instance selection). Fix the cause and retry."
         return {
-          content: [{ type: "text", text: `search_requirements failed: ${(error as Error).message}` }],
+          content: [{ type: "text", text: `search_requirements failed: ${message}\n\n${guidance}` }],
           isError: true,
         }
       }

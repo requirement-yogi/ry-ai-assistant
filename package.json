@@ -14,12 +14,14 @@
     "node": ">=18"
   },
   "scripts": {
-    "build": "rimraf dist && tsc",
+    "generate:docs": "node scripts/embed-docs.mjs",
+    "compile": "npm run generate:docs && rimraf dist && tsc",
+    "build": "npm run compile && npm run build:prod && npm run build:dev",
     "start": "node dist/index.js",
-    "bundle": "esbuild src/index.ts --bundle --platform=node --target=node18 --format=esm",
-    "build:dev": "npm run bundle -- --define:process.env.RY_ENV='\"dev\"' --outfile=standalone/ry-ai-assistant-dev.mjs",
+    "bundle": "npm run generate:docs && esbuild src/index.ts --bundle --platform=node --target=node18 --format=esm",
     "build:prod": "npm run bundle -- --define:process.env.RY_ENV='\"prod\"' --outfile=standalone/ry-ai-assistant.mjs",
-    "prepare": "npm run build"
+    "build:dev": "npm run bundle -- --define:process.env.RY_ENV='\"dev\"' --outfile=standalone/ry-ai-assistant-dev.mjs",
+    "prepare": "npm run compile"
   },
   "keywords": [
     "mcp",
