@@ -4,6 +4,9 @@ node_modules/
 # Build
 dist/
 
+# Codegen output (regenerated from the .md sources by scripts/embed-docs.mjs on every build)
+*.generated.ts
+
 # Environnement
 .env
 
@@ -18,3 +21,6 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Standalone single-file bundle (built on demand)
+standalone/

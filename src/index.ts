@@ -1,7 +1,9 @@
+#!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { registerBuildAdfTool } from "./tools/buildAdf.js"
 import { registerEditPageTool } from "./tools/editPage.js"
+import { registerJiraLinkTools } from "./tools/jiraLinks.js"
 
 const server = new McpServer({
     name: "ry-ai-assistant",
@@ -12,6 +14,8 @@ const server = new McpServer({
 registerBuildAdfTool(server)
 // Use case 2: analyze an existing page and reshape it so requirements are indexable.
 registerEditPageTool(server)
+// Use case 3: link requirements to Jira issues through the Requirement Yogi API.
+registerJiraLinkTools(server)
 
 const transport = new StdioServerTransport()
 await server.connect(transport)
