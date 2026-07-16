@@ -29,10 +29,10 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that l
 git clone https://github.com/requirement-yogi/ry-ai-assistant.git
 cd ry-ai-assistant
 npm install
-npm run build
+npm run build:prod
 ```
 
-The compiled server is now at `dist/index.js`.
+The standalone server bundle is now at `standalone/ry-ai-assistant.mjs` — point your client configuration at that file (see [Connecting your client](#connecting-your-client)).
 
 ## Configuration
 

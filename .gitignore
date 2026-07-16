@@ -4,6 +4,9 @@ node_modules/
 # Build
 dist/
 
+# Codegen output (regenerated from the .md sources by scripts/embed-docs.mjs on every build)
+*.generated.ts
+
 # Environnement
 .env
 

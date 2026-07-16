@@ -23,30 +23,50 @@ This MCP is **not** a document-authoring tool. Its single value is owning the **
 ## Commands
 
 ```bash
-npm run build   # compile TypeScript → dist/
-npm start       # run the compiled build (node dist/index.js)
+npm run build        # full build: tsc → dist/ + both esbuild bundles into standalone/
+npm run build:prod   # prod bundle only → standalone/ry-ai-assistant.mjs
+npm run build:dev    # dev bundle only  → standalone/ry-ai-assistant-dev.mjs (local hosts baked in)
+npm run compile      # tsc only → dist/ (also what `prepare`/`npm install` runs)
+npm start            # run the compiled dist build (node dist/index.js)
 ```
 
-> Note: `tsx`/`npm run dev` is currently broken in the Linux sandbox (the installed esbuild
-> binary targets macOS). Run via the compiled `dist/` instead: `npm run build && node dist/...`.
+The dev/prod split is **baked at build time** via esbuild `--define:process.env.RY_ENV=...`, so
+each bundle is a self-contained `.mjs` with its environment hard-wired (the prod bundle still reads
+`RY_DATA_RESIDENCY` at runtime; the dev bundle forces the local hosts — see `DEV_HOSTS` in
+`src/api/ryClient.ts`). The dev bundle is internal only and must not be referenced in the public
+README.
+
+> Note: the `build:prod`/`build:dev` (and therefore `build`) steps need a platform-native esbuild.
+> In the Linux sandbox the installed esbuild binary targets macOS, so those steps fail here — use
+> `npm run compile` in the sandbox and run the full `npm run build` on macOS.
 
 ## Architecture
 
 ```
 src/
-├── index.ts                  # MCP server, registers the 7 tools
+├── index.ts                  # MCP server, registers the 8 tools
 ├── schemas/requirements.ts   # Zod schema + TypeScript types for the requirements tree
 ├── api/
 │   └── ryClient.ts           # HTTP client for the RY APIs (applications, search, relationships, links)
 └── tools/
     ├── buildAdf.ts           # build_requirements_adf — tool wrapper (use case 1)
     ├── editPage.ts           # edit_page_requirements — analyze + reshape an existing page (use case 2)
-    ├── jiraLinks.ts          # the 5 use-case-3 tools (organizations, applications, search, relationships, links)
-    ├── searchSyntax.ts       # SEARCH_SYNTAX — the RY search syntax reference surfaced to the LLM
+    ├── jiraLinks.ts          # the 6 use-case-3 tools (organizations, applications, searchable-fields, search, relationships, links)
+    ├── searchSyntax.ts       # SEARCH_SYNTAX — RQL reference surfaced to the LLM; loaded from docs/search-syntax-prompt-v3.md (never hardcoded)
     ├── adfRender.ts          # shared deterministic renderers: tree→ADF, table, paragraph (the RY intelligence)
     ├── macro.ts              # buildInlineExtension — shared RY macro node, single source of truth
     └── indexingRules.ts      # KEY_RULES + INDEXING_CONTEXTS — the RY rules surfaced to the LLM
+docs/
+    └── search-syntax-prompt-v3.md   # AUTHORITATIVE RQL syntax (from the backend ANTLR grammar + DSL eval); single source of truth
+scripts/
+    └── embed-docs.mjs        # build-time codegen: docs/*.md → src/docs/*.generated.ts (imported by both tsc and esbuild builds)
 ```
+
+The RQL reference is written **once** in `src/docs/search-syntax-prompt-v3.md`. `scripts/embed-docs.mjs`
+(run by `generate:docs`, and automatically by `compile`/`bundle`) embeds it into a git-ignored
+`*.generated.ts` module, so `searchSyntax.ts` imports it and it can never drift — edit the markdown,
+never re-hardcode the syntax. Codegen (rather than a runtime `readFileSync`) is what lets the same
+import work in both the `tsc`→`dist/` build and the self-contained esbuild `.mjs` bundle.
 
 ## The MCP Tools
 
@@ -56,7 +76,8 @@ src/
 | `edit_page_requirements` | `page_adf`, `operations[]` | modified ADF body | Use case 2 — analyze an existing page and reshape it for indexing |
 | `list_organizations` | — | organizations JSON (IDs + names) | Use case 3 — only when the token spans several organizations |
 | `list_applications` | `organization_id?` | applications JSON (IDs + base URLs) | Use case 3 — discover the connected instances |
-| `search_requirements` | `query` (RY search syntax), `space_key?`, `offset?`, `base_url?` | requirements JSON (IDs + container/variant) | Use case 3 — discover the RY requirements |
+| `list_searchable_fields` | `space`, `application_id?`, `base_url?` | JSON of the space's real identifiers (properties, external, relationships, variants…) | Use case 3 — schema grounding: call before writing a query to avoid inventing field names |
+| `search_requirements` | `query` (RQL), `space_key?`, `offset?`, `base_url?` | `{ total_count, returned, requirements[] }` (IDs + container/variant) | Use case 3 — discover the RY requirements; relays RQL parse errors verbatim for self-correction |
 | `list_relationships` | `application_id?` | relationships JSON (with IDs) | Use case 3 — discover the available relationship types |
 | `link_requirements_to_jira` | `links[]` (selection, jira_application_id, issue_ids, relationship_id), `base_url?` | creation report | Use case 3 — create the links via the RY jira-bulk service |
 
@@ -129,16 +150,29 @@ The MCP owns the Requirement Yogi side; the Jira side is delegated to the Atlass
   source of the `jiraApplicationId` needed for linking; CONFLUENCE items are the source of the
   instance base URL needed by the Confluence API auth (see below). When several instances of a
   type are connected, the LLM asks the user which one to use.
+- Reliable RQL is achieved through **three complementary mechanisms**:
+  1. **Reference in context** — the authoritative RQL syntax (`src/docs/search-syntax-prompt-v3.md`,
+     derived from the backend ANTLR grammar + DSL eval) is embedded in the `search_requirements`
+     tool description via `searchSyntax.ts`, loaded from the file at build time (never hardcoded).
+  2. **Schema grounding** — `list_searchable_fields(space)` returns the space's REAL identifiers so
+     the LLM can't invent names (its description says to call it first if unsure). It is built from
+     confirmed endpoints only: relationship names from `/relationships`, and properties/variants/
+     rules/jira-projects aggregated from a bounded sample (`key ~ '%'`, capped at 1000) of the
+     space's own requirements via `/rest/search`. Categories the sampled DTO doesn't expose are
+     returned best-effort with a caveat in `notes`.
+  3. **Self-correction** — when the RY API answers a bad query with `400 Syntax error at position
+     N: …`, `search_requirements` relays that message **verbatim** (never masked) plus a "fix and
+     resubmit" hint, so the LLM corrects its RQL and retries.
 - `search_requirements` finds the requirements via the RY Confluence API (GET `/rest/search`,
-  paginated by 200 with `offset`, optional `spaceKey`). The **LLM writes the query** in the RY
-  custom search syntax: the full syntax reference (fields, operators, gotchas, examples) is
-  embedded in the tool description from `searchSyntax.ts` — same pattern as the indexing rules.
-  The response is a `DTOSearchResult<DTORequirement>`; each requirement is **trimmed** to the
-  linking essentials (`id`, `key`, `text`, `applicationId`, `containerId`, `variantId`, `status`,
-  `canonicalURL`, `properties` — heavy fields like storage data and dependencies are dropped, and
-  the default-true `withLinks`/`withOriginalLinks`/`withDependencies` flags are sent as false).
-  The pagination envelope (`total`, `hasNext`) and the query feedback (`humanReadable`,
-  `messageBean`) are kept.
+  paginated by 200 with `offset`, optional `spaceKey`). The **LLM writes the query** in RQL.
+  The response is a `DTOSearchResult<DTORequirement>`; the tool returns
+  `{ total_count, returned, requirements[] }` (never a raw list — `total_count` is the full match
+  count, so the LLM can tell too-broad from too-narrow and iterate). Each requirement is **trimmed**
+  to the linking essentials (`id`, `key`, `text`, `applicationId`, `containerId`, `variantId`,
+  `status`, `canonicalURL`, `properties` — heavy fields like storage data and dependencies are
+  dropped, and the default-true `withLinks`/`withOriginalLinks`/`withDependencies` flags are sent as
+  false). The pagination envelope (`offset`, `limit`, `hasNext`) and the query feedback
+  (`humanReadable`, `messageBean`) are kept.
 - Finding existing Jira issues (or creating missing ones) is done by the **Atlassian MCP**
   (`searchJiraIssuesUsingJql` / `createJiraIssue`). The tool descriptions require the LLM to ask
   the user how they want the Jira side structured (one issue per requirement or grouped, epics /
@@ -158,7 +192,7 @@ The MCP owns the Requirement Yogi side; the Jira side is delegated to the Atlass
 
 | Env var | Value |
 |---|---|
-| `RY_ENV` | `dev` or `prod` (default `prod`). `dev` forces the local dev hosts (standalone `http://localhost:3003/api`, Confluence `https://https4028.websites.requirementyogi.com`) and ignores `RY_DATA_RESIDENCY` |
+| `RY_ENV` | `dev` or `prod` (default `prod`). Baked into the bundle at build time (esbuild `--define`, via `build:dev`/`build:prod`). `dev` forces the local dev hosts (see `DEV_HOSTS` in `src/api/ryClient.ts`) and ignores `RY_DATA_RESIDENCY`. Internal only — never document it in the public README. |
 | `RY_DATA_RESIDENCY` | `EU` or `US` — mapped internally to the right API hosts (prod only) |
 | `RY_PERSONAL_ACCESS_TOKEN` | RY personal access token |
 
@@ -184,7 +218,8 @@ Use case 2 (edit):
   → user confirms → edit_page_requirements → modified ADF → publish via updateConfluencePage (version + 1)
 
 Use case 3 (link to Jira):
-  [User] asks to link requirements to Jira → search_requirements (RY IDs)
+  [User] asks to link requirements to Jira → (list_searchable_fields to ground the query)
+  → search_requirements (RY IDs)
   → find/create the Jira issues via Atlassian MCP (user chooses the structure first)
   → list_relationships (user picks the relationship) → link_requirements_to_jira
 ```
