@@ -1,60 +1,67 @@
 # RY AI assistant — MCP Server
 
-An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that lets any LLM client place [Requirement Yogi](https://www.requirementyogi.com) macros into Confluence pages — either by building a brand-new page from a plain-language prompt, or by analyzing an existing page and reshaping it so its requirements become indexable. It can also search your requirements and link them to Jira issues through the Requirement Yogi API. All without leaving your chat interface.
+An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that lets any LLM client (Claude Desktop, Claude Code, Cursor…) place [Requirement Yogi](https://www.requirementyogi.com) macros into Confluence pages — either by building a brand-new page from a plain-language prompt, or by analyzing an existing page and reshaping it so its requirements become indexable. It can also search your requirements and link them to Jira issues.
 
-**Your LLM does the thinking.** Our MCP server owns the Requirement Yogi indexing rules and produces the Confluence page body (ADF) deterministically. Publishing the page itself is delegated to your Confluence/Atlassian MCP tools, and so is finding or creating the Jira issues to link.
-
----
-
-## Prerequisites
-- [Node.js](https://nodejs.org) 18 or later (to run the server)
-- An MCP-compatible LLM client (see [Connecting your client](#connecting-your-client) below)
-- Confluence/Atlassian MCP tools connected in the same client, used to publish the page the server produces and to find/create the Jira issues to link
-- A Confluence instance with the [Requirement Yogi](https://www.requirementyogi.com) app installed
-- For the Jira-linking tools: a Requirement Yogi **personal access token** (see [Configuration](#configuration) below)
+**Your LLM does the thinking.** This server owns the Requirement Yogi indexing rules and produces the Confluence page body deterministically. Publishing the page and finding or creating the Jira issues to link are delegated to your Atlassian MCP tools.
 
 ---
 
 ## Installation
 
-### Option A — Download and install the latest release (recommended)
+Follow these six steps in order.
 
-1. Download the latest release from the [releases page](https://github.com/requirement-yogi/ry-ai-assistant/releases).
-2. Save the `ry-ai-assistant.mjs` file to a location of your choice.
-3. Add the [configuration to your client](#connecting-your-client).
+### 1. Have a Confluence instance with Requirement Yogi
 
-### Option B — Clone and build
+You need a Confluence instance with the [Requirement Yogi](https://www.requirementyogi.com) app installed. Note whether your data is hosted in the **EU** or the **US** — you'll need it in step 5.
 
-```bash
-git clone https://github.com/requirement-yogi/ry-ai-assistant.git
-cd ry-ai-assistant
-npm install
-npm run build:prod
-```
+### 2. Create a Requirement Yogi personal access token
 
-The standalone server bundle is now at `standalone/ry-ai-assistant.mjs` — point your client configuration at that file (see [Connecting your client](#connecting-your-client)).
+In the Requirement Yogi standalone app, generate a **personal access token**. Copy it somewhere safe — you'll paste it in step 5.
 
-## Configuration
+> This token is only required for the requirement-search and Jira-linking tools. The page-authoring tools work without it.
 
-The server is configured through **environment variables**, set in the `env` section of your client's MCP configuration (see the examples in [Connecting your client](#connecting-your-client)):
+### 3. Add the Atlassian MCP to your LLM client
 
-| Environment variable | Value |
-|---|---|
-| `RY_DATA_RESIDENCY` | `EU` or `US` — the data residency of your Requirement Yogi instance. The server maps it to the right Requirement Yogi API hosts. |
-| `RY_PERSONAL_ACCESS_TOKEN` | Your Requirement Yogi personal access token, used to authenticate against the Requirement Yogi APIs. |
+Install the **Atlassian MCP** in your client. This server relies on it to publish the pages it produces and to find or create the Jira issues you want to link. See Atlassian's documentation for the setup.
 
-Both variables are required by the requirement search and Jira-linking tools. The page-authoring tools (`build_requirements_adf`, `edit_page_requirements`) work without them.
+### 4. Use an LLM client that supports local MCP servers
 
-## Connecting your client
+Any MCP-compatible client works — [Claude Desktop](https://claude.ai/download), [Claude Code](https://docs.claude.com/en/docs/claude-code), [Cursor](https://cursor.com), VS Code (Copilot / Cline / Roo), and others.
 
-The server communicates over **stdio** — the standard MCP transport. Every MCP-compatible client uses a JSON configuration file. Replace `/path/to/ry-ai-assistant` with the actual absolute path where you cloned the repo.
+### 5. Configure the MCP server
 
-### Claude Desktop
+The **one-click bundle** below is by far the simplest way — use it if you're on Claude Desktop. Any other client uses the manual setup.
+
+<details open>
+<summary><strong>Claude Desktop — one-click (recommended)</strong></summary>
+
+1. Download **`ry-ai-assistant.mcpb`** from the [releases page](https://github.com/requirement-yogi/ry-ai-assistant/releases).
+2. Double-click the file — Claude Desktop opens its installer. (Or, in Claude Desktop: **Settings → Extensions → Install extension…** and pick the file.)
+3. In the form, set **Data residency** to `EU` or `US` (step 1), paste your **personal access token** (step 2), and click **Install**.
+
+That's it — no Node.js, no file paths, no JSON to edit. Continue to step 6.
+
+</details>
 
 <details>
-<summary><strong>macOS</strong></summary>
+<summary><strong>Other clients — manual setup</strong> (Claude Code, Cursor, VS Code, or Claude Desktop by hand)</summary>
 
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
+**a. Get the server file.** Download `ry-ai-assistant.mjs` from the [releases page](https://github.com/requirement-yogi/ry-ai-assistant/releases) and save it somewhere permanent. Note its full path.
+
+> Prefer to build from source? See [Building from source](#building-from-source) at the bottom.
+
+**b. Install Node.js.** The server runs on [Node.js](https://nodejs.org) 18 or later. Download and install it if you don't have it.
+
+**c. Add the configuration to your client.** Pick your client below. In every case, replace `/path/to/ry-ai-assistant.mjs` with the real path from step 5a, set `RY_DATA_RESIDENCY` to `EU` or `US` (step 1), and paste your token from step 2.
+
+<details>
+<summary><strong>Claude Desktop (by hand)</strong></summary>
+
+Open the config file for your OS and add the `ry-ai-assistant` block:
+
+- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+- **Linux:** `~/.config/Claude/claude_desktop_config.json`
 
 ```json
 {
@@ -71,79 +78,28 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-</details>
-
-<details>
-<summary><strong>Windows</strong></summary>
-
-Edit `%APPDATA%\Claude\claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "ry-ai-assistant": {
-      "command": "node",
-      "args": ["C:\\path\\to\\ry-ai-assistant.mjs"],
-      "env": {
-        "RY_DATA_RESIDENCY": "EU",
-        "RY_PERSONAL_ACCESS_TOKEN": "<your-personal-access-token>"
-      }
-    }
-  }
-}
-```
+On Windows, write the path with double backslashes, e.g. `"C:\\path\\to\\ry-ai-assistant.mjs"`.
 
 </details>
 
 <details>
-<summary><strong>Linux</strong></summary>
-
-Edit `~/.config/Claude/claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "ry-ai-assistant": {
-      "command": "node",
-      "args": ["/path/to/ry-ai-assistant.mjs"],
-      "env": {
-        "RY_DATA_RESIDENCY": "EU",
-        "RY_PERSONAL_ACCESS_TOKEN": "<your-personal-access-token>"
-      }
-    }
-  }
-}
-```
-
-</details>
-
-Restart Claude Desktop.
-
----
-
-### Claude Code (CLI)
-
-Add the server to your project or global config:
+<summary><strong>Claude Code (CLI)</strong></summary>
 
 ```bash
-# Project-level (creates .claude/mcp.json)
 claude mcp add ry-ai-assistant \
   --env RY_DATA_RESIDENCY=EU \
   --env RY_PERSONAL_ACCESS_TOKEN=<your-personal-access-token> \
   -- node /path/to/ry-ai-assistant.mjs
-
-# Or global
-claude mcp add --global ry-ai-assistant \
-  --env RY_DATA_RESIDENCY=EU \
-  --env RY_PERSONAL_ACCESS_TOKEN=<your-personal-access-token> \
-  -- node /path/to/ry-ai-assistant.mjs
 ```
 
----
+Add `--global` right after `add` to install it for all your projects.
 
-### Cursor
+</details>
 
-Open **Settings → MCP** (or edit `~/.cursor/mcp.json` on macOS/Linux, `%APPDATA%\Cursor\mcp.json` on Windows):
+<details>
+<summary><strong>Cursor</strong></summary>
+
+Open **Settings → MCP**, or edit `~/.cursor/mcp.json` (macOS/Linux) / `%APPDATA%\Cursor\mcp.json` (Windows):
 
 ```json
 {
@@ -160,9 +116,10 @@ Open **Settings → MCP** (or edit `~/.cursor/mcp.json` on macOS/Linux, `%APPDAT
 }
 ```
 
----
+</details>
 
-### VS Code (GitHub Copilot / Cline / Roo)
+<details>
+<summary><strong>VS Code (Copilot / Cline / Roo)</strong></summary>
 
 Edit `.vscode/mcp.json` in your workspace, or your user `settings.json` under `"mcp.servers"`:
 
@@ -182,11 +139,10 @@ Edit `.vscode/mcp.json` in your workspace, or your user `settings.json` under `"
 }
 ```
 
----
+</details>
 
-### Any other MCP-compatible client
-
-Use these values:
+<details>
+<summary><strong>Any other MCP-compatible client</strong></summary>
 
 | Field | Value |
 |---|---|
@@ -194,6 +150,38 @@ Use these values:
 | Command | `node` |
 | Args | `["/path/to/ry-ai-assistant.mjs"]` |
 | Env | `RY_DATA_RESIDENCY` = `EU` or `US`, `RY_PERSONAL_ACCESS_TOKEN` = your token |
+
+</details>
+
+**What the two settings mean:**
+
+| Setting | Value |
+|---|---|
+| `RY_DATA_RESIDENCY` | `EU` or `US` — where your Requirement Yogi instance is hosted (step 1). |
+| `RY_PERSONAL_ACCESS_TOKEN` | Your Requirement Yogi personal access token (step 2). |
+
+</details>
+
+### 6. Restart your LLM client
+
+Fully quit and reopen your client so it picks up the new server. The `ry-ai-assistant` tools are now available in your chat.
+
+---
+
+## Building from source
+
+Instead of downloading the release, you can build the server yourself:
+
+```bash
+git clone https://github.com/requirement-yogi/ry-ai-assistant.git
+cd ry-ai-assistant
+npm install
+npm run build:prod
+```
+
+The bundle is written to `standalone/ry-ai-assistant.mjs` — use that path in step 5.
+
+To also produce the one-click `standalone/ry-ai-assistant.mcpb`, run `npm run build:mcpb` afterwards (or `npm run build` to produce everything at once).
 
 ## License
 
