@@ -4,6 +4,9 @@ node_modules/
 # Build
 dist/
 
+# .mcpb packaging staging dir (scripts/build-mcpb.mjs)
+build/
+
 # Codegen output (regenerated from the .md sources by scripts/embed-docs.mjs on every build)
 *.generated.ts
 

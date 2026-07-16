@@ -16,13 +16,14 @@
   "scripts": {
     "generate:docs": "node scripts/embed-docs.mjs",
     "compile": "npm run generate:docs && rimraf dist && tsc",
-    "build": "npm run compile && npm run build:prod && npm run build:dev",
+    "build": "npm run compile && npm run build:prod && npm run build:dev && npm run build:mcpb",
     "start": "node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "bundle": "npm run generate:docs && esbuild src/index.ts --bundle --platform=node --target=node18 --format=esm",
     "build:prod": "npm run bundle -- --define:process.env.RY_ENV='\"prod\"' --outfile=standalone/ry-ai-assistant.mjs",
     "build:dev": "npm run bundle -- --define:process.env.RY_ENV='\"dev\"' --outfile=standalone/ry-ai-assistant-dev.mjs",
+    "build:mcpb": "node scripts/build-mcpb.mjs",
     "prepare": "npm run compile"
   },
   "keywords": [
