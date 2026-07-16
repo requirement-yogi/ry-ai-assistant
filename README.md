@@ -7,7 +7,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that l
 ---
 
 ## Prerequisites
-- [Node.js](https://nodejs.org) 18 or later (to run the server
+- [Node.js](https://nodejs.org) 18 or later (to run the server)
 - An MCP-compatible LLM client (see [Connecting your client](#connecting-your-client) below)
 - Confluence/Atlassian MCP tools connected in the same client, used to publish the page the server produces and to find/create the Jira issues to link
 - A Confluence instance with the [Requirement Yogi](https://www.requirementyogi.com) app installed

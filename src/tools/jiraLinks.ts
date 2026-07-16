@@ -72,7 +72,7 @@ function summarizeRequirement(item: unknown): unknown {
   return summary
 }
 
-function summarizeSearchPage(page: unknown): unknown {
+export function summarizeSearchPage(page: unknown): unknown {
   if (!page || typeof page !== "object" || !Array.isArray((page as Record<string, unknown>).results)) {
     return page
   }
@@ -96,7 +96,7 @@ function summarizeSearchPage(page: unknown): unknown {
 // POST /rest/jira-bulk/links answers with a DTOJiraBulkLinkResult:
 // { linkedCount, skippedCount (link already existed), unauthorizedCount (issues the
 // user cannot read) }.
-function formatBulkLinkResult(result: unknown): string {
+export function formatBulkLinkResult(result: unknown): string {
   if (result && typeof result === "object") {
     const record = result as Record<string, unknown>
     if (typeof record.linkedCount === "number") {
@@ -113,7 +113,7 @@ function formatBulkLinkResult(result: unknown): string {
   return JSON.stringify(result)
 }
 
-const SelectionSchema = z
+export const SelectionSchema = z
   .object({
     query: z
       .string()
@@ -130,6 +130,12 @@ const SelectionSchema = z
       .optional()
       .describe("Requirement IDs explicitly excluded (useful with select_all)"),
     select_all: z.boolean().optional().describe("Select every requirement matched by query (default false)"),
+  })
+  // select_all means "link every requirement the query matches", so the query is what defines the
+  // set — without it there is nothing to select. Fail fast here rather than at the RY API call.
+  .refine((selection) => !selection.select_all || (selection.query != null && selection.query.trim() !== ""), {
+    message: "query is required (and must be non-empty) when select_all is true",
+    path: ["query"],
   })
   .describe("Which requirements this link applies to")
 

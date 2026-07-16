@@ -97,7 +97,12 @@ async function doRequest(url: string, headers: Record<string, string>, init?: Re
   const method = init?.method ?? "GET"
   const response = await fetch(url, {
     ...init,
-    headers: { Accept: "application/json", "Content-Type": "application/json", ...headers },
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      ...(init?.headers as Record<string, string> | undefined),
+      ...headers,
+    },
   })
   if (!response.ok) {
     const body = await response.text().catch(() => "")
@@ -123,18 +128,18 @@ async function requestConfluence(path: string, init?: RequestInit, instanceBaseU
 }
 
 // A paginated endpoint may return a bare array or wrap it in a well-known property.
-function extractItems(page: unknown): unknown[] {
+export function extractItems(page: unknown): unknown[] {
   if (Array.isArray(page)) return page
   if (page && typeof page === "object") {
     const record = page as Record<string, unknown>
-    for (const property of ["results", "relationships", "applications", "items", "values"]) {
+    for (const property of ["results", "relationships", "applications", "organizations", "items", "values"]) {
       if (Array.isArray(record[property])) return record[property] as unknown[]
     }
   }
   return []
 }
 
-function pageTotal(page: unknown): number | undefined {
+export function pageTotal(page: unknown): number | undefined {
   if (page && typeof page === "object" && typeof (page as Record<string, unknown>).total === "number") {
     return (page as Record<string, unknown>).total as number
   }
@@ -181,7 +186,16 @@ let cachedOrganizationId: number | undefined
 // Requirement Yogi admin panel in Confluence or Jira).
 async function resolveOrganizationId(): Promise<number | undefined> {
   if (cachedOrganizationId !== undefined) return cachedOrganizationId
-  const organizations = await listOrganizations()
+  // GET /organizations is a best-effort convenience: it lets us scope /applications when the token
+  // spans several organizations. Its path/shape is not yet confirmed against the real API, so a
+  // failure here must NOT sink the single-organization happy path — fall through to an unscoped
+  // /applications call (as if no organization were resolvable) rather than throwing.
+  let organizations: unknown[]
+  try {
+    organizations = await listOrganizations()
+  } catch {
+    return undefined // let /applications decide without an organizationId scope
+  }
   const ids = [...new Set(organizations.map(organizationIdOf).filter((id): id is number => id !== undefined))]
   if (ids.length === 0) return undefined // token presumably scoped; let /applications decide
   if (ids.length === 1) {
@@ -321,7 +335,7 @@ function stringField(record: Record<string, unknown>, ...names: string[]): strin
 
 // A requirement property may be shaped as { label | name, value, external?, type? }. Collect its
 // identifier; classify as external (ext@) when the entry advertises it, otherwise plain (@).
-function collectProperties(req: Record<string, unknown>, plain: Set<string>, external: Set<string>): void {
+export function collectProperties(req: Record<string, unknown>, plain: Set<string>, external: Set<string>): void {
   const properties = req.properties
   if (!Array.isArray(properties)) return
   for (const entry of properties) {
