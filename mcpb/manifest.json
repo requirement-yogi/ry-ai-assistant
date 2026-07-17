@@ -37,9 +37,9 @@
     "personal_access_token": {
       "type": "string",
       "title": "Requirement Yogi personal access token",
-      "description": "Generate it in the Requirement Yogi standalone app. Required only for the requirement-search and Jira-linking tools; leave empty if you only build or edit pages.",
+      "description": "Generate it in the Requirement Yogi standalone app. EU zone: https://app.requirementyogi.com/settings/personal-access-tokens or US zone: https://app.us.requirementyogi.com/settings/personal-access-tokens",
       "sensitive": true,
-      "required": false
+      "required": true
     }
   }
 }

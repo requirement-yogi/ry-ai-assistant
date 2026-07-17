@@ -1,13 +1,20 @@
 // HTTP client for the Requirement Yogi APIs.
 //
 // Configuration:
-//   RY_ENV                    "dev" or "prod" (default "prod"). Baked into the bundle at build
-//                             time (esbuild --define, see build:dev / build:prod); "dev" forces
-//                             the local dev hosts and ignores RY_DATA_RESIDENCY. Can still be
-//                             overridden by a real env var when running the tsc `dist/` build.
-//   RY_DATA_RESIDENCY         "EU" or "US" — we map it to the right API hosts internally
-//                             (prod only). From the MCP server environment (mcpServers config).
-//   RY_PERSONAL_ACCESS_TOKEN  personal access token. From the MCP server environment.
+// Every environment-specific value is BAKED at build time via esbuild --define (see
+// scripts/build-bundle.mjs, driven by build:dev / build:prod). The only runtime MCP config is the
+// access token (and RY_DATA_RESIDENCY in prod), so the MCP setup is identical for dev and prod.
+//
+//   RY_ENV                    "dev" or "prod" (default "prod"). Baked; selects the mode: prod uses
+//                             the fixed baked values, dev uses the per-developer baked hosts below
+//                             and ignores RY_DATA_RESIDENCY.
+//   RY_DATA_RESIDENCY         "EU" or "US" — mapped to the right API hosts (prod only, RUNTIME:
+//                             one prod bundle serves both). From the MCP server environment.
+//   RY_PERSONAL_ACCESS_TOKEN  personal access token. RUNTIME, from the MCP server environment.
+//   RY_DEV_CONFLUENCE_URL     dev only, BAKED from .env.dev — this developer's Confluence dev
+//                             instance base URL (unique per developer).
+//   RY_DEV_STANDALONE_URL     dev only, BAKED from .env.dev — this developer's standalone API base
+//                             URL. Optional; defaults to the usual local http://localhost:8082/api.
 //
 // RY exposes several APIs; the host AND the auth scheme depend on the call:
 //   - the standalone API (new)     → applications (GET /applications) and relationships
@@ -17,6 +24,8 @@
 //                                    X-Api-Key: <token> and X-Base-Url: <instance base URL>.
 //                                    The instance base URL comes from GET /applications on the
 //                                    standalone API (auto-resolved and cached below).
+
+import { isDevEnv, requireDevValue } from "../env.js"
 
 // Prod hosts, selected by data residency. The `/api` suffix is part of the standalone base
 // (the paths — /applications, /relationships… — don't carry it); the Confluence paths already
@@ -32,25 +41,30 @@ const API_HOSTS = {
   },
 } as const
 
-// Dev hosts (RY_ENV=dev): standalone served locally, Confluence on the shared dev instance.
-// Same base convention as prod — standalone keeps the /api suffix, Confluence stays bare.
-const DEV_HOSTS = {
-  confluence: "https://https4028.websites.requirementyogi.com",
-  standalone: "http://localhost:8082/api",
-} as const
-
 type ApiHosts = { confluence: string; standalone: string }
 
 type DataResidency = keyof typeof API_HOSTS
 
-// RY_ENV picks the environment; anything other than "dev" (including unset) means prod.
-function isDevEnv(): boolean {
-  return process.env.RY_ENV?.trim().toLowerCase() === "dev"
+// Dev hosts (RY_ENV=dev) are per-developer, so each developer's dev build bakes them from its
+// .env.dev: the Confluence dev instance is that developer's own tunnel (required), the standalone
+// API usually runs locally (optional, defaults to the standard local port). Same base convention
+// as prod — standalone keeps the /api suffix, Confluence stays bare.
+const DEV_STANDALONE_DEFAULT = "http://localhost:8082/api"
+
+function devHosts(): ApiHosts {
+  return {
+    confluence: requireDevValue(
+      "RY_DEV_CONFLUENCE_URL",
+      process.env.RY_DEV_CONFLUENCE_URL,
+      "It is your personal Confluence dev instance base URL (e.g. https://<your-tunnel>.websites.requirementyogi.com)."
+    ),
+    standalone: process.env.RY_DEV_STANDALONE_URL?.trim() || DEV_STANDALONE_DEFAULT,
+  }
 }
 
-// Dev forces the local hosts and ignores RY_DATA_RESIDENCY; prod maps residency to hosts.
+// Dev uses the per-developer hosts and ignores RY_DATA_RESIDENCY; prod maps residency to hosts.
 function apiHosts(): ApiHosts {
-  return isDevEnv() ? DEV_HOSTS : API_HOSTS[dataResidency()]
+  return isDevEnv() ? devHosts() : API_HOSTS[dataResidency()]
 }
 
 const SEARCH_PAGE_SIZE = 200
