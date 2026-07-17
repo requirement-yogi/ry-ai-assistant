@@ -4,11 +4,17 @@ node_modules/
 # Build
 dist/
 
+# .mcpb packaging staging dir (scripts/build-mcpb.mjs)
+build/
+
 # Codegen output (regenerated from the .md sources by scripts/embed-docs.mjs on every build)
 *.generated.ts
 
-# Environnement
+# Environnement (per-developer, baked into the dev bundle at build time — see .env.dev.example)
 .env
+.env.dev
+.env.*
+!.env.dev.example
 
 # Fichiers générés par le mock server
 output/

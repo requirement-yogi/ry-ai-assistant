@@ -16,13 +16,13 @@
   "scripts": {
     "generate:docs": "node scripts/embed-docs.mjs",
     "compile": "npm run generate:docs && rimraf dist && tsc",
-    "build": "npm run compile && npm run build:prod && npm run build:dev",
+    "build": "npm run compile && npm run build:prod && npm run build:dev && npm run build:mcpb",
     "start": "node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "bundle": "npm run generate:docs && esbuild src/index.ts --bundle --platform=node --target=node18 --format=esm",
-    "build:prod": "npm run bundle -- --define:process.env.RY_ENV='\"prod\"' --outfile=standalone/ry-ai-assistant.mjs",
-    "build:dev": "npm run bundle -- --define:process.env.RY_ENV='\"dev\"' --outfile=standalone/ry-ai-assistant-dev.mjs",
+    "build:prod": "npm run generate:docs && node scripts/build-bundle.mjs prod",
+    "build:dev": "npm run generate:docs && node scripts/build-bundle.mjs dev",
+    "build:mcpb": "node scripts/build-mcpb.mjs prod",
     "prepare": "npm run compile"
   },
   "keywords": [
@@ -39,7 +39,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
-    "esbuild": "^0.28.0",
+    "esbuild-wasm": "^0.28.0",
     "rimraf": "^6.1.3",
     "tsx": "^4.22.3",
     "typescript": "^6.0.3",

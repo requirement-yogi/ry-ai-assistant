@@ -1,0 +1,45 @@
+{
+  "manifest_version": "0.3",
+  "name": "ry-ai-assistant",
+  "display_name": "Requirement Yogi AI Assistant",
+  "version": "0.2.0-beta",
+  "description": "Place Requirement Yogi macros into Confluence pages, and link requirements to Jira, straight from your LLM chat.",
+  "long_description": "An MCP server that lets your LLM build or reshape Confluence pages so their requirements become indexable by Requirement Yogi, search your requirements, and link them to Jira issues. The server owns the Requirement Yogi indexing rules and produces the page body deterministically; publishing the page and finding or creating Jira issues are delegated to your Atlassian MCP tools.",
+  "author": {
+    "name": "Requirement Yogi",
+    "url": "https://www.requirementyogi.com"
+  },
+  "homepage": "https://www.requirementyogi.com",
+  "documentation": "https://github.com/requirement-yogi/ry-ai-assistant",
+  "license": "Apache-2.0",
+  "icon": "icon.png",
+  "keywords": ["mcp", "requirement-yogi", "confluence", "requirements", "jira"],
+  "server": {
+    "type": "node",
+    "entry_point": "server/ry-ai-assistant.mjs",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/ry-ai-assistant.mjs"],
+      "env": {
+        "RY_DATA_RESIDENCY": "${user_config.data_residency}",
+        "RY_PERSONAL_ACCESS_TOKEN": "${user_config.personal_access_token}"
+      }
+    }
+  },
+  "user_config": {
+    "data_residency": {
+      "type": "string",
+      "title": "Data residency",
+      "description": "Where your Requirement Yogi data is hosted. Type EU or US.",
+      "default": "EU",
+      "required": true
+    },
+    "personal_access_token": {
+      "type": "string",
+      "title": "Requirement Yogi personal access token",
+      "description": "Generate it in the Requirement Yogi standalone app. EU zone: https://app.requirementyogi.com/settings/personal-access-tokens or US zone: https://app.us.requirementyogi.com/settings/personal-access-tokens",
+      "sensitive": true,
+      "required": true
+    }
+  }
+}

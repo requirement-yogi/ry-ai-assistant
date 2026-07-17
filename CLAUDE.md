@@ -25,20 +25,33 @@ This MCP is **not** a document-authoring tool. Its single value is owning the **
 ```bash
 npm run build        # full build: tsc → dist/ + both esbuild bundles into standalone/
 npm run build:prod   # prod bundle only → standalone/ry-ai-assistant.mjs
-npm run build:dev    # dev bundle only  → standalone/ry-ai-assistant-dev.mjs (local hosts baked in)
+npm run build:dev    # dev bundle only  → standalone/ry-ai-assistant-dev.mjs (dev mode baked in)
 npm run compile      # tsc only → dist/ (also what `prepare`/`npm install` runs)
 npm start            # run the compiled dist build (node dist/index.js)
 ```
 
-The dev/prod split is **baked at build time** via esbuild `--define:process.env.RY_ENV=...`, so
-each bundle is a self-contained `.mjs` with its environment hard-wired (the prod bundle still reads
-`RY_DATA_RESIDENCY` at runtime; the dev bundle forces the local hosts — see `DEV_HOSTS` in
-`src/api/ryClient.ts`). The dev bundle is internal only and must not be referenced in the public
-README.
+The dev/prod split is **fully baked at build time** by `scripts/build-bundle.mjs` (esbuild `define`).
+Every environment-specific value is hard-wired into its bundle, so the **runtime MCP config is
+identical for dev and prod** — the only difference is which `.mjs` you point at:
 
-> Note: the `build:prod`/`build:dev` (and therefore `build`) steps need a platform-native esbuild.
-> In the Linux sandbox the installed esbuild binary targets macOS, so those steps fail here — use
-> `npm run compile` in the sandbox and run the full `npm run build` on macOS.
+- **prod** (`build:prod`) bakes `RY_ENV=prod`; the fixed prod values (Forge `environment_id`
+  `126ed95b-…`, the constant `application_id`) live as constants in the source. `RY_DATA_RESIDENCY`
+  stays a *runtime* choice because a single prod bundle serves both EU and US.
+- **dev** (`build:dev`) bakes `RY_ENV=dev` plus that developer's unique values, read from a
+  git-ignored **`.env.dev`** (copy `.env.dev.example`): `RY_DEV_FORGE_ENV_ID` (macro extension id,
+  `src/tools/macro.ts`) and `RY_DEV_CONFLUENCE_URL` / `RY_DEV_STANDALONE_URL` (hosts, `devHosts()`
+  in `src/api/ryClient.ts`).
+
+`RY_ENV` / `isDevEnv()` / `requireDevValue()` live in `src/env.ts`. **esbuild `define` only
+substitutes static `process.env.<NAME>` reads** — never a computed `process.env[name]` — so the
+source reads each baked var literally and passes the value to `requireDevValue`. The dev bundle is
+internal only and must not be referenced in the public README.
+
+> Note: the bundler is **`esbuild-wasm`** (a WASM engine), not native `esbuild`, so `build:prod`/
+> `build:dev`/`build` run identically on macOS and in the Linux sandbox from one shared
+> `node_modules` — no per-platform native binary to reinstall. (`npm test`/vitest still pulls native
+> esbuild transitively, so if you switch OS on a shared `node_modules`, re-run `npm install` before
+> `npm test` — the build itself is unaffected.)
 
 ## Architecture
 
@@ -59,7 +72,8 @@ src/
 docs/
     └── search-syntax-prompt-v3.md   # AUTHORITATIVE RQL syntax (from the backend ANTLR grammar + DSL eval); single source of truth
 scripts/
-    └── embed-docs.mjs        # build-time codegen: docs/*.md → src/docs/*.generated.ts (imported by both tsc and esbuild builds)
+    ├── embed-docs.mjs        # build-time codegen: docs/*.md → src/docs/*.generated.ts (imported by both tsc and esbuild builds)
+    └── build-bundle.mjs      # esbuild bundler: bakes env-specific values via `define` (RY_ENV + dev's .env.dev) → standalone/*.mjs
 ```
 
 The RQL reference is written **once** in `src/docs/search-syntax-prompt-v3.md`. `scripts/embed-docs.mjs`
@@ -192,9 +206,21 @@ The MCP owns the Requirement Yogi side; the Jira side is delegated to the Atlass
 
 | Env var | Value |
 |---|---|
-| `RY_ENV` | `dev` or `prod` (default `prod`). Baked into the bundle at build time (esbuild `--define`, via `build:dev`/`build:prod`). `dev` forces the local dev hosts (see `DEV_HOSTS` in `src/api/ryClient.ts`) and ignores `RY_DATA_RESIDENCY`. Internal only — never document it in the public README. |
-| `RY_DATA_RESIDENCY` | `EU` or `US` — mapped internally to the right API hosts (prod only) |
+Runtime (MCP `mcpServers` env) — **same for dev and prod**:
+
+| Env var | Value |
+|---|---|
 | `RY_PERSONAL_ACCESS_TOKEN` | RY personal access token |
+| `RY_DATA_RESIDENCY` | `EU` or `US` — mapped internally to the right API hosts (prod only; ignored in dev) |
+
+Build-time (baked by `scripts/build-bundle.mjs`, **not** in the MCP config):
+
+| Baked var | Value |
+|---|---|
+| `RY_ENV` | `dev` or `prod` (default `prod`). Baked by `build:dev`/`build:prod`; selects the *mode* only. Internal — never document it in the public README. |
+| `RY_DEV_FORGE_ENV_ID` | **dev only, from `.env.dev`** — this developer's Forge environment id (the middle UUID of the requirement-yogi extension key). Required for `build:dev`. Prod uses the fixed source constant `126ed95b-…`; the `application_id` (`2237ccc1-…`) is constant across environments. |
+| `RY_DEV_CONFLUENCE_URL` | **dev only, from `.env.dev`** — this developer's Confluence dev instance base URL (their own tunnel). Required for `build:dev`. |
+| `RY_DEV_STANDALONE_URL` | **dev only, from `.env.dev`** — this developer's standalone API base URL. Optional; defaults to `http://localhost:8082/api`. |
 
 Hosts per residency (in `src/api/ryClient.ts`): old Confluence REST API
 `https://confluence[.us].requirementyogi.com` (search + jira-bulk links), new standalone API
