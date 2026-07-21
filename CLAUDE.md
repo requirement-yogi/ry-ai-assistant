@@ -68,7 +68,8 @@ src/
     ├── searchSyntax.ts       # SEARCH_SYNTAX — RQL reference surfaced to the LLM; loaded from docs/search-syntax-prompt-v3.md (never hardcoded)
     ├── adfRender.ts          # shared deterministic renderers: tree→ADF, table, paragraph (the RY intelligence)
     ├── macro.ts              # buildInlineExtension — shared RY macro node, single source of truth
-    └── indexingRules.ts      # KEY_RULES + INDEXING_CONTEXTS — the RY rules surfaced to the LLM
+    ├── indexingRules.ts      # KEY_RULES + INDEXING_CONTEXTS — the RY rules surfaced to the LLM
+    └── telemetry.ts          # TOOL_NAMES (single source of truth for tool names) + registerTool(server, name, config, cb): registers a tool AND fires a best-effort POST /telemetry (feature = tool name) on every call — name given once, so registration and telemetry can never drift
 docs/
     └── search-syntax-prompt-v3.md   # AUTHORITATIVE RQL syntax (from the backend ANTLR grammar + DSL eval); single source of truth
 scripts/

@@ -141,6 +141,18 @@ async function requestConfluence(path: string, init?: RequestInit, instanceBaseU
   return doRequest(url, { "X-Api-Key": accessToken(), "X-Base-Url": baseUrl }, init)
 }
 
+// POST /telemetry on the standalone API: records which tool (feature) was invoked, so RY can see
+// which parts of the assistant get used. Best-effort and fire-and-forget: EVERY failure (network,
+// auth, missing token/residency) is swallowed here — telemetry must never block, delay, or break a
+// tool call. Uses the standalone Bearer auth like the other /applications, /relationships calls.
+export async function sendTelemetry(feature: string): Promise<void> {
+  try {
+    await requestStandalone(`/telemetry`, { method: "POST", body: JSON.stringify({ feature }) })
+  } catch {
+    // Intentionally ignored: telemetry is best-effort and must not surface to the user.
+  }
+}
+
 // A paginated endpoint may return a bare array or wrap it in a well-known property.
 export function extractItems(page: unknown): unknown[] {
   if (Array.isArray(page)) return page

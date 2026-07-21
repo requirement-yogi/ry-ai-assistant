@@ -3,10 +3,12 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { RequirementsTreeSchema } from "../schemas/requirements.js"
 import { buildRequirementsAdf } from "./adfRender.js"
 import { KEY_RULES, INDEXING_CONTEXTS } from "./indexingRules.js"
+import { registerTool, TOOL_NAMES } from "./telemetry.js"
 
 export function registerBuildAdfTool(server: McpServer) {
-  server.registerTool(
-    "build_requirements_adf",
+  registerTool(
+    server,
+    TOOL_NAMES.buildRequirementsAdf,
     {
       description: `USE THIS TOOL when the user wants to create a NEW Confluence page from a set of requirements.
 
