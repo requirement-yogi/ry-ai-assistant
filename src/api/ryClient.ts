@@ -107,19 +107,56 @@ function accessToken(): string {
   return token
 }
 
+// Node's fetch rejects with a bare `TypeError: fetch failed` on any connection-level failure
+// (DNS, refused, TLS, timeout); the actionable detail lives on error.cause. Surface it so callers
+// see e.g. "connection failed for https://…/organizations: ECONNREFUSED" instead of "fetch failed".
+function fetchFailureDetail(error: unknown): string {
+  const cause = (error as { cause?: unknown }).cause
+  if (cause && typeof cause === "object") {
+    return [(cause as { code?: string }).code, (cause as { message?: string }).message].filter(Boolean).join(" ")
+  }
+  return (error as Error).message
+}
+
+function describeFetchFailure(url: string, error: unknown): Error {
+  const detail = fetchFailureDetail(error)
+  return new Error(
+    `Connection failed for ${url}: ${detail || "fetch failed"}. The server was never reached — check the API host is correct and reachable (dev builds target http://localhost:8082; a running local server, VPN or proxy may be required).`
+  )
+}
+
+// Dev-only HTTP tracing. stdio reserves STDOUT for the JSON-RPC stream, so logs MUST go to STDERR
+// (console.error) or they corrupt the protocol. Gated on RY_ENV=dev (baked), so prod is silent and
+// pays nothing. Token headers (Authorization / X-Api-Key) are NEVER logged; X-Base-Url is (it's the
+// Confluence instance, not a secret, and it's exactly what you want when debugging instance routing).
+function logDev(...parts: unknown[]): void {
+  if (isDevEnv()) console.error("[ry-dev]", ...parts)
+}
+
 async function doRequest(url: string, headers: Record<string, string>, init?: RequestInit): Promise<unknown> {
   const method = init?.method ?? "GET"
-  const response = await fetch(url, {
-    ...init,
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      ...(init?.headers as Record<string, string> | undefined),
-      ...headers,
-    },
-  })
+  const baseUrlHeader = headers["X-Base-Url"]
+  logDev(`→ ${method} ${url}${baseUrlHeader ? ` (X-Base-Url: ${baseUrlHeader})` : ""}`)
+  const startedAt = Date.now()
+  let response: Response
+  try {
+    response = await fetch(url, {
+      ...init,
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        ...(init?.headers as Record<string, string> | undefined),
+        ...headers,
+      },
+    })
+  } catch (error) {
+    logDev(`✗ ${method} ${url} — connection failed after ${Date.now() - startedAt}ms: ${fetchFailureDetail(error)}`)
+    throw describeFetchFailure(url, error)
+  }
+  logDev(`← ${response.status} ${response.statusText} ${method} ${new URL(url).pathname} (${Date.now() - startedAt}ms)`)
   if (!response.ok) {
     const body = await response.text().catch(() => "")
+    logDev(`  body: ${body || "(empty)"}`)
     throw new Error(
       `RY API ${method} ${new URL(url).pathname} failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ""}`
     )
