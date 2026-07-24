@@ -10,6 +10,7 @@ import {
   type JiraBulkLink,
 } from "../api/ryClient.js"
 import { SEARCH_SYNTAX } from "./searchSyntax.js"
+import { registerTool, TOOL_NAMES } from "./telemetry.js"
 
 // Use case 3: link Requirement Yogi requirements to Jira issues.
 //
@@ -140,8 +141,9 @@ export const SelectionSchema = z
   .describe("Which requirements this link applies to")
 
 export function registerJiraLinkTools(server: McpServer) {
-  server.registerTool(
-    "list_organizations",
+  registerTool(
+    server,
+    TOOL_NAMES.listOrganizations,
     {
       description: `USE THIS TOOL to discover the Requirement Yogi organizations the access token can see. You normally DON'T need it: with a single organization everything is resolved automatically. Use it only when another tool failed because several organizations are accessible.
 
@@ -173,8 +175,9 @@ If there are several, ask the user which one to use (the organization ID is visi
     }
   )
 
-  server.registerTool(
-    "list_applications",
+  registerTool(
+    server,
+    TOOL_NAMES.listApplications,
     {
       description: `USE THIS TOOL to discover the Confluence and Jira instances connected to Requirement Yogi, typically as the first step of linking requirements to Jira issues.
 
@@ -223,8 +226,9 @@ Keep the application IDs (jira_application_id) and base URLs (base_url) for the 
     }
   )
 
-  server.registerTool(
-    "list_searchable_fields",
+  registerTool(
+    server,
+    TOOL_NAMES.listSearchableFields,
     {
       description: `USE THIS TOOL to discover the REAL searchable identifiers of a Confluence space before you write an RQL query. CALL THIS FIRST whenever you are not sure which fields, properties or relationships a space actually has — it is what prevents you from inventing names that don't exist.
 
@@ -278,8 +282,9 @@ Use ONLY these identifiers when writing the query for search_requirements (plus 
     }
   )
 
-  server.registerTool(
-    "search_requirements",
+  registerTool(
+    server,
+    TOOL_NAMES.searchRequirements,
     {
       description: `USE THIS TOOL when the user wants to find their Requirement Yogi requirements, typically as the first step of linking them to Jira issues.
 
@@ -345,8 +350,9 @@ If hasNext is true, call search_requirements again with offset = offset + limit 
     }
   )
 
-  server.registerTool(
-    "list_relationships",
+  registerTool(
+    server,
+    TOOL_NAMES.listRelationships,
     {
       description: `USE THIS TOOL to discover the relationship types available in Requirement Yogi before linking requirements to Jira issues.
 
@@ -388,8 +394,9 @@ Keep the relationship IDs: they are needed by link_requirements_to_jira.`,
     }
   )
 
-  server.registerTool(
-    "link_requirements_to_jira",
+  registerTool(
+    server,
+    TOOL_NAMES.linkRequirementsToJira,
     {
       description: `USE THIS TOOL as the FINAL step when the user wants to link Requirement Yogi requirements to Jira issues.
 

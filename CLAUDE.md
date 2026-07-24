@@ -57,18 +57,23 @@ internal only and must not be referenced in the public README.
 
 ```
 src/
-├── index.ts                  # MCP server, registers the 8 tools
+├── index.ts                  # MCP server (version from version.generated.ts), sets `instructions`, starts the update check, registers the 9 tools
+├── version.generated.ts      # AUTO-GENERATED from package.json by embed-docs.mjs — the server's own version (single source: package.json)
+├── updateCheck.ts            # session-level update-check state: caches the GitHub check + emits the once-per-session "update available" banner (shared by updates.ts and telemetry.ts, no import cycle)
 ├── schemas/requirements.ts   # Zod schema + TypeScript types for the requirements tree
 ├── api/
-│   └── ryClient.ts           # HTTP client for the RY APIs (applications, search, relationships, links)
+│   ├── ryClient.ts           # HTTP client for the RY APIs (applications, search, relationships, links). In dev (RY_ENV=dev) traces every call to STDERR ([ry-dev] → method/url, ← status/ms, ✗ cause); tokens are never logged. Connection failures surface error.cause (ECONNREFUSED/ENOTFOUND/…) instead of a bare "fetch failed".
+│   └── githubReleases.ts     # update check: GET the latest GitHub release + semver compare (best-effort, never throws)
 └── tools/
+    ├── updates.ts            # check_for_updates — ON-DEMAND "is this MCP up to date?" tool (the automatic once-per-session banner is injected by telemetry.ts, not this tool)
     ├── buildAdf.ts           # build_requirements_adf — tool wrapper (use case 1)
     ├── editPage.ts           # edit_page_requirements — analyze + reshape an existing page (use case 2)
     ├── jiraLinks.ts          # the 6 use-case-3 tools (organizations, applications, searchable-fields, search, relationships, links)
     ├── searchSyntax.ts       # SEARCH_SYNTAX — RQL reference surfaced to the LLM; loaded from docs/search-syntax-prompt-v3.md (never hardcoded)
     ├── adfRender.ts          # shared deterministic renderers: tree→ADF, table, paragraph (the RY intelligence)
     ├── macro.ts              # buildInlineExtension — shared RY macro node, single source of truth
-    └── indexingRules.ts      # KEY_RULES + INDEXING_CONTEXTS — the RY rules surfaced to the LLM
+    ├── indexingRules.ts      # KEY_RULES + INDEXING_CONTEXTS — the RY rules surfaced to the LLM
+    └── telemetry.ts          # TOOL_NAMES (single source of truth for tool names) + registerTool/withTelemetry: registers a tool, fires a best-effort POST /telemetry (feature = tool name) on every call, AND prepends the once-per-session update banner to the first tool result (takeReadyUpdateNotice) — the single choke point every tool passes through
 docs/
     └── search-syntax-prompt-v3.md   # AUTHORITATIVE RQL syntax (from the backend ANTLR grammar + DSL eval); single source of truth
 scripts/
@@ -86,6 +91,7 @@ import work in both the `tsc`→`dist/` build and the self-contained esbuild `.m
 
 | Tool | Input | Output | Role |
 |---|---|---|---|
+| `check_for_updates` | — | update status + latest release notes | On-demand "am I up to date?" check. The once-per-session "update available" notice is surfaced automatically (banner prepended to the first tool result by `withTelemetry`), so this tool is a manual re-check, not the primary path |
 | `build_requirements_adf` | `tree` (requirements JSON) | ADF body | Use case 1 — render a new page from scratch |
 | `edit_page_requirements` | `page_adf`, `operations[]` | modified ADF body | Use case 2 — analyze an existing page and reshape it for indexing |
 | `list_organizations` | — | organizations JSON (IDs + names) | Use case 3 — only when the token spans several organizations |
@@ -96,6 +102,35 @@ import work in both the `tsc`→`dist/` build and the self-contained esbuild `.m
 | `link_requirements_to_jira` | `links[]` (selection, jira_application_id, issue_ids, relationship_id), `base_url?` | creation report | Use case 3 — create the links via the RY jira-bulk service |
 
 The two ADF tools produce ADF, ready to be published with `contentFormat: "adf"`. Both share the renderers in `adfRender.ts` so RY formatting is identical whether a page is created or edited. **ADF is the single source of truth** — there is no Markdown intermediate and no refine loop (a Markdown roundtrip would destroy an existing page's formatting).
+
+## Version & update check
+
+The server's version has a single source of truth: **`package.json`** (already synced to
+`mcpb/manifest.json` by `scripts/build-mcpb.mjs`). `scripts/embed-docs.mjs` bakes it into the
+git-ignored `src/version.generated.ts` so the running server knows its own version in both builds
+(`tsc`→`dist/` and the self-contained `.mjs` bundle) without reading `package.json` at runtime.
+`index.ts` uses it as the `McpServer` version. **Bump the version in `package.json` only.**
+
+The check compares that version against the latest GitHub release
+(`GET https://api.github.com/repos/requirement-yogi/ry-ai-assistant/releases/latest`, in
+`src/api/githubReleases.ts`) using a small semver comparator. It is **best-effort**: offline /
+rate-limited (403) / no-release (404) all yield a `{ checked: false }` result with a note, never an
+error.
+
+**It does NOT rely on the LLM calling a tool** (clients often don't). The flow, all in
+`src/updateCheck.ts`:
+- `index.ts` calls `startUpdateCheck()` at boot → one GitHub round-trip per process (≈ per session),
+  cached, with the resolved value mirrored into a plain variable.
+- `withTelemetry` (the choke point every tool passes through) calls `takeReadyUpdateNotice()` after
+  each tool runs. It's **non-blocking** (returns `undefined` until the startup check has resolved →
+  zero added latency) and **one-shot** (fires at most once per session, and only when an update is
+  actually available). The banner — a `[Requirement Yogi AI Assistant — update available]` block —
+  is prepended to that first tool result. It's skipped for `check_for_updates` itself.
+- `check_for_updates` (`src/tools/updates.ts`) remains for an explicit re-check, sharing the same
+  cached result.
+
+The server's `instructions` (in `index.ts`) just tell the LLM how to react to the banner; they are
+not what triggers the check.
 
 ## JSON Schema (Zod)
 

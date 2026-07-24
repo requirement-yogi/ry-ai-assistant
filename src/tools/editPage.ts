@@ -7,6 +7,7 @@ import {
   renderRequirementRows,
 } from "./adfRender.js"
 import { KEY_RULES, INDEXING_CONTEXTS } from "./indexingRules.js"
+import { registerTool, TOOL_NAMES } from "./telemetry.js"
 
 type Mark = { type: string; attrs?: Record<string, unknown> }
 type AdfNode = {
@@ -230,8 +231,9 @@ const OperationSchema = z.discriminatedUnion("mode", [InlineOp, ParagraphOp, Tab
 export { anchoredInject, applyReplace, applyInsertAfter, blockText }
 
 export function registerEditPageTool(server: McpServer) {
-  server.registerTool(
-    "edit_page_requirements",
+  registerTool(
+    server,
+    TOOL_NAMES.editPageRequirements,
     {
       description: `USE THIS TOOL when the user wants to add or fix Requirement Yogi macros on an EXISTING Confluence page.
 
