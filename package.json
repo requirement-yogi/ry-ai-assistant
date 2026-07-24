@@ -15,13 +15,15 @@
   },
   "scripts": {
     "generate:docs": "node scripts/embed-docs.mjs",
-    "compile": "npm run generate:docs && rimraf dist && tsc",
+    "generate:ui": "node scripts/build-ui.mjs",
+    "generate": "npm run generate:docs && npm run generate:ui",
+    "compile": "npm run generate && rimraf dist && tsc",
     "build": "npm run compile && npm run build:prod && npm run build:dev && npm run build:mcpb",
     "start": "node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "build:prod": "npm run generate:docs && node scripts/build-bundle.mjs prod",
-    "build:dev": "npm run generate:docs && node scripts/build-bundle.mjs dev",
+    "build:prod": "npm run generate && node scripts/build-bundle.mjs prod",
+    "build:dev": "npm run generate && node scripts/build-bundle.mjs dev",
     "build:mcpb": "node scripts/build-mcpb.mjs prod",
     "prepare": "npm run compile"
   },
@@ -34,7 +36,9 @@
   "author": "",
   "license": "Apache-2.0",
   "dependencies": {
+    "@modelcontextprotocol/ext-apps": "^1.7.4",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "cytoscape": "^3.34.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
