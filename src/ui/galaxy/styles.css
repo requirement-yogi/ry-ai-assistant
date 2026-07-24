@@ -1,0 +1,24 @@
+:root { color-scheme: dark; font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif); }
+* { box-sizing: border-box; }
+body { margin: 0; background: #090d1a; color: #eef2ff; }
+#app { height: min(720px, 78vh); min-height: 500px; display: grid; grid-template-columns: 1fr 310px; overflow: hidden; border-radius: 14px; background: radial-gradient(circle at 30% 25%, #182657 0, #090d1a 45%); }
+#graph { min-width: 0; height: 100%; }
+#detail { border-left: 1px solid #293453; padding: 20px; overflow: auto; background: rgba(9, 13, 26, .86); }
+.eyebrow { color: #99a9ff; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+h1 { margin: 5px 0 10px; font-size: 20px; }
+h2 { margin: 0 0 8px; font-size: 16px; }
+p { color: #c7d0e9; font-size: 13px; line-height: 1.45; }
+.muted { color: #8390b2; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0; }
+.badge { font-size: 11px; border-radius: 99px; padding: 4px 8px; background: #1d2b4d; color: #cbd6ff; }
+.badge.status { background: #173f3d; color: #9af2e7; }
+.property { padding: 8px 0; border-top: 1px solid #202a45; font-size: 12px; }
+.property b { display: block; color: #8390b2; margin-bottom: 2px; }
+button, a.action { display: inline-block; border: 0; border-radius: 7px; padding: 8px 10px; font: inherit; font-size: 12px; color: #fff; background: #465be8; cursor: pointer; text-decoration: none; }
+button.secondary { background: #1d2b4d; }
+.legend { position: absolute; left: 14px; bottom: 12px; display: flex; gap: 10px; font-size: 11px; color: #aab5d5; pointer-events: none; }
+/* Mirrors the node chips: a tinted rounded frame in the type colour. */
+.legend span::before { content: ""; display: inline-block; width: 14px; height: 9px; border-radius: 3px; margin-right: 5px; border: 1.5px solid #739CEB; background: rgba(115, 156, 235, .18); }
+.legend .page::before { border-color: #5BC8A8; background: rgba(91, 200, 168, .18); }
+.legend .jira::before { border-color: #FFB86C; background: rgba(255, 184, 108, .18); }
+@media (max-width: 700px) { #app { grid-template-columns: 1fr; height: min(780px, 86vh); } #detail { border-left: 0; border-top: 1px solid #293453; max-height: 260px; } }

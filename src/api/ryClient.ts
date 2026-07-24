@@ -241,6 +241,12 @@ function applicationBaseUrl(application: unknown): string | undefined {
   return typeof baseUrl === "string" ? baseUrl : undefined
 }
 
+function applicationId(application: unknown): number | undefined {
+  if (!application || typeof application !== "object") return undefined
+  const id = (application as Record<string, unknown>).id
+  return typeof id === "number" ? id : undefined
+}
+
 // /applications can list several Confluence AND several Jira instances (plus the
 // standalone app itself); only the active Confluence ones are candidates for X-Base-Url.
 function isActiveConfluenceApplication(application: unknown): boolean {
@@ -281,32 +287,69 @@ export type SearchOptions = {
   spaceKey?: string
   offset?: number
   instanceBaseUrl?: string
+  /** Ask RY for the relationship-heavy DTO used by Requirement Galaxy. */
+  includeGraphData?: boolean
 }
 
 // GET /rest/search on the Confluence API. The query uses the RY custom search
 // syntax (see searchSyntax.ts, surfaced to the LLM in the tool description).
 // The response is a DTOSearchResult<DTORequirement>: { results, offset, limit, total,
-// hasNext, humanReadable?, messageBean }. Links/dependencies are not needed for the
-// linking use case, so their default-true flags are turned off to slim the payload.
+// hasNext, humanReadable?, messageBean }. Links/dependencies/Jira data are not needed for the
+// linking use case, so the payload is slimmed unless the caller asks for graph data.
 export async function searchRequirements(options: SearchOptions): Promise<unknown> {
+  // Each flag is sent explicitly, never left to its default: withLinks/withOriginalLinks/
+  // withDependencies default to true (so the linking use case must switch them OFF to slim the
+  // payload) while withJiraData/withExternalProperties default to false (so the graph use case
+  // must switch them ON — without withJiraData the DTO carries no Jira reference at all).
+  //const graph = options.includeGraphData === true
+  const graph =  true
   const params = new URLSearchParams({
     query: options.query,
     limit: String(SEARCH_PAGE_SIZE),
     offset: String(options.offset ?? 0),
-    withLinks: "false",
-    withOriginalLinks: "false",
-    withDependencies: "false",
+    withLinks: String(graph),
+    withOriginalLinks: String(graph),
+    withDependencies: String(graph),
+    withJiraData: String(graph),
+    withExternalProperties: String(graph),
   })
   if (options.spaceKey) params.set("spaceKey", options.spaceKey)
   return requestConfluence(`/rest/search?${params}`, undefined, options.instanceBaseUrl)
 }
 
+let cachedConfluenceApplicationId: number | undefined
+
+// The relationships endpoint needs an applicationId: without one its permission evaluator calls
+// findById(null) and answers 500 "The given id must not be null" instead of a 4xx. So resolve the
+// active Confluence application ourselves (same listing that yields the base URL) rather than
+// letting the caller omit it.
+async function resolveConfluenceApplicationId(): Promise<number> {
+  if (cachedConfluenceApplicationId !== undefined) return cachedConfluenceApplicationId
+  const applications = await listApplications()
+  const ids = [
+    ...new Set(
+      applications
+        .filter(isActiveConfluenceApplication)
+        .map(applicationId)
+        .filter((id): id is number => id !== undefined)
+    ),
+  ]
+  if (ids.length === 1) {
+    cachedConfluenceApplicationId = ids[0]
+    return cachedConfluenceApplicationId
+  }
+  throw new Error(
+    ids.length === 0
+      ? "Could not resolve a Requirement Yogi application id from GET /applications. Call list_applications, ask the user which application to use, and pass application_id explicitly."
+      : `Several Confluence applications are connected (ids: ${ids.join(", ")}). Ask the user which one to use and pass application_id explicitly.`
+  )
+}
+
 // GET /relationships on the standalone API, paginated with offset/limit.
-// applicationId is required unless the token is already scoped to a single application.
-export async function listAllRelationships(applicationId?: number): Promise<unknown[]> {
-  const path =
-    applicationId !== undefined ? `/relationships?applicationId=${applicationId}` : `/relationships`
-  return fetchAllStandalonePages(path, RELATIONSHIPS_PAGE_SIZE)
+// applicationId is mandatory server-side; it is auto-resolved when the caller omits it.
+export async function listAllRelationships(explicitApplicationId?: number): Promise<unknown[]> {
+  const id = explicitApplicationId ?? (await resolveConfluenceApplicationId())
+  return fetchAllStandalonePages(`/relationships?applicationId=${id}`, RELATIONSHIPS_PAGE_SIZE)
 }
 
 // --- Schema grounding: list_searchable_fields -------------------------------------------------
