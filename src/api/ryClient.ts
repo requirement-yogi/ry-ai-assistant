@@ -1,4 +1,15 @@
-// HTTP client for the Requirement Yogi APIs.
+// HTTP client for the Requirement Yogi APIs. Transport only — what to call and how to authenticate
+// it. Anything that decides WHAT to fetch or how to interpret it is a service (src/services/).
+//
+// It is a CLASS rather than a set of module functions because it owns two caches (the resolved
+// organization and Confluence instance) and its configuration. As module-level `let`s those were
+// process-global: a test could not get a clean client, and the second test to run inherited the
+// first one's resolved instance. As instance fields they belong to a client you can just create
+// another of.
+//
+// Production still uses a single shared instance — `ryClient()` below builds it lazily on first
+// use, so a missing token surfaces as a RyConfigError on the first tool call rather than at import
+// time (where nothing could catch it and the whole server would fail to start).
 //
 // Configuration:
 // Every environment-specific value is BAKED at build time via esbuild --define (see
@@ -23,9 +34,26 @@
 //                                    service (POST /rest/jira-bulk/links); auth = two headers,
 //                                    X-Api-Key: <token> and X-Base-Url: <instance base URL>.
 //                                    The instance base URL comes from GET /applications on the
-//                                    standalone API (auto-resolved and cached below).
+//                                    standalone API (auto-resolved and cached per client).
 
 import { isDevEnv, requireDevValue } from "../env.js"
+import { logDev } from "../log.js"
+import { RyAmbiguityError, RyApiError, RyConfigError, RyConnectionError, RyResponseError } from "../errors.js"
+import {
+  ApplicationSchema,
+  BulkLinkResultSchema,
+  OrganizationSchema,
+  RelationshipSchema,
+  SearchPageSchema,
+  isActiveConfluenceApplication,
+  parseApi,
+  parseApiItems,
+  type Application,
+  type BulkLinkResult,
+  type Organization,
+  type Relationship,
+  type SearchPage,
+} from "./dto.js"
 
 // Prod hosts, selected by data residency. The `/api` suffix is part of the standalone base
 // (the paths — /applications, /relationships… — don't carry it); the Confluence paths already
@@ -41,7 +69,7 @@ const API_HOSTS = {
   },
 } as const
 
-type ApiHosts = { confluence: string; standalone: string }
+export type ApiHosts = { confluence: string; standalone: string }
 
 type DataResidency = keyof typeof API_HOSTS
 
@@ -51,24 +79,10 @@ type DataResidency = keyof typeof API_HOSTS
 // as prod — standalone keeps the /api suffix, Confluence stays bare.
 const DEV_STANDALONE_DEFAULT = "http://localhost:8082/api"
 
-function devHosts(): ApiHosts {
-  return {
-    confluence: requireDevValue(
-      "RY_DEV_CONFLUENCE_URL",
-      process.env.RY_DEV_CONFLUENCE_URL,
-      "It is your personal Confluence dev instance base URL (e.g. https://<your-tunnel>.websites.requirementyogi.com)."
-    ),
-    standalone: process.env.RY_DEV_STANDALONE_URL?.trim() || DEV_STANDALONE_DEFAULT,
-  }
-}
-
-// Dev uses the per-developer hosts and ignores RY_DATA_RESIDENCY; prod maps residency to hosts.
-function apiHosts(): ApiHosts {
-  return isDevEnv() ? devHosts() : API_HOSTS[dataResidency()]
-}
-
 const SEARCH_PAGE_SIZE = 200
-const RELATIONSHIPS_PAGE_SIZE = 100
+// One page size for every standalone-API endpoint (organizations, applications, relationships):
+// they share the same { items, offset, limit, total } envelope, so they page identically.
+const STANDALONE_PAGE_SIZE = 100
 
 // Mirrors DTORequirementSelection: which requirements a bulk operation applies to.
 export type RequirementSelection = {
@@ -87,24 +101,51 @@ export type JiraBulkLink = {
   relationshipId: number
 }
 
+export type SearchOptions = {
+  query: string
+  spaceKey?: string
+  offset?: number
+  instanceBaseUrl?: string
+}
+
+export type RyClientConfig = {
+  hosts: ApiHosts
+  token: string
+}
+
 function dataResidency(): DataResidency {
   const raw = process.env.RY_DATA_RESIDENCY?.trim().toUpperCase()
   if (raw !== "EU" && raw !== "US") {
-    throw new Error(
+    throw new RyConfigError(
       `RY_DATA_RESIDENCY must be "EU" or "US" (got ${raw ? `"${raw}"` : "nothing"}). Set it in the MCP server environment (env section of the mcpServers config).`
     )
   }
   return raw
 }
 
-function accessToken(): string {
+function devHosts(): ApiHosts {
+  return {
+    confluence: requireDevValue(
+      "RY_DEV_CONFLUENCE_URL",
+      process.env.RY_DEV_CONFLUENCE_URL,
+      "It is your personal Confluence dev instance base URL (e.g. https://<your-tunnel>.websites.requirementyogi.com)."
+    ),
+    standalone: process.env.RY_DEV_STANDALONE_URL?.trim() || DEV_STANDALONE_DEFAULT,
+  }
+}
+
+// Reads the runtime configuration out of the environment. Throws RyConfigError when something the
+// client cannot work without is missing, so the failure lands on the first tool call, described.
+export function resolveConfig(): RyClientConfig {
+  // Dev uses the per-developer hosts and ignores RY_DATA_RESIDENCY; prod maps residency to hosts.
+  const hosts = isDevEnv() ? devHosts() : API_HOSTS[dataResidency()]
   const token = process.env.RY_PERSONAL_ACCESS_TOKEN
   if (!token) {
-    throw new Error(
+    throw new RyConfigError(
       "RY_PERSONAL_ACCESS_TOKEN is not set. Add your Requirement Yogi personal access token to the MCP server environment (env section of the mcpServers config)."
     )
   }
-  return token
+  return { hosts, token }
 }
 
 // Node's fetch rejects with a bare `TypeError: fetch failed` on any connection-level failure
@@ -116,78 +157,6 @@ function fetchFailureDetail(error: unknown): string {
     return [(cause as { code?: string }).code, (cause as { message?: string }).message].filter(Boolean).join(" ")
   }
   return (error as Error).message
-}
-
-function describeFetchFailure(url: string, error: unknown): Error {
-  const detail = fetchFailureDetail(error)
-  return new Error(
-    `Connection failed for ${url}: ${detail || "fetch failed"}. The server was never reached — check the API host is correct and reachable (dev builds target http://localhost:8082; a running local server, VPN or proxy may be required).`
-  )
-}
-
-// Dev-only HTTP tracing. stdio reserves STDOUT for the JSON-RPC stream, so logs MUST go to STDERR
-// (console.error) or they corrupt the protocol. Gated on RY_ENV=dev (baked), so prod is silent and
-// pays nothing. Token headers (Authorization / X-Api-Key) are NEVER logged; X-Base-Url is (it's the
-// Confluence instance, not a secret, and it's exactly what you want when debugging instance routing).
-function logDev(...parts: unknown[]): void {
-  if (isDevEnv()) console.error("[ry-dev]", ...parts)
-}
-
-async function doRequest(url: string, headers: Record<string, string>, init?: RequestInit): Promise<unknown> {
-  const method = init?.method ?? "GET"
-  const baseUrlHeader = headers["X-Base-Url"]
-  logDev(`→ ${method} ${url}${baseUrlHeader ? ` (X-Base-Url: ${baseUrlHeader})` : ""}`)
-  const startedAt = Date.now()
-  let response: Response
-  try {
-    response = await fetch(url, {
-      ...init,
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        ...(init?.headers as Record<string, string> | undefined),
-        ...headers,
-      },
-    })
-  } catch (error) {
-    logDev(`✗ ${method} ${url} — connection failed after ${Date.now() - startedAt}ms: ${fetchFailureDetail(error)}`)
-    throw describeFetchFailure(url, error)
-  }
-  logDev(`← ${response.status} ${response.statusText} ${method} ${new URL(url).pathname} (${Date.now() - startedAt}ms)`)
-  if (!response.ok) {
-    const body = await response.text().catch(() => "")
-    logDev(`  body: ${body || "(empty)"}`)
-    throw new Error(
-      `RY API ${method} ${new URL(url).pathname} failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ""}`
-    )
-  }
-  if (response.status === 204) return null
-  return response.json()
-}
-
-// New standalone API: Bearer token.
-async function requestStandalone(path: string, init?: RequestInit): Promise<unknown> {
-  const url = `${apiHosts().standalone}${path}`
-  return doRequest(url, { Authorization: `Bearer ${accessToken()}` }, init)
-}
-
-// Old Confluence REST API: X-Api-Key + X-Base-Url headers.
-async function requestConfluence(path: string, init?: RequestInit, instanceBaseUrl?: string): Promise<unknown> {
-  const url = `${apiHosts().confluence}${path}`
-  const baseUrl = instanceBaseUrl ?? (await resolveInstanceBaseUrl())
-  return doRequest(url, { "X-Api-Key": accessToken(), "X-Base-Url": baseUrl }, init)
-}
-
-// POST /telemetry on the standalone API: records which tool (feature) was invoked, so RY can see
-// which parts of the assistant get used. Best-effort and fire-and-forget: EVERY failure (network,
-// auth, missing token/residency) is swallowed here — telemetry must never block, delay, or break a
-// tool call. Uses the standalone Bearer auth like the other /applications, /relationships calls.
-export async function sendTelemetry(feature: string): Promise<void> {
-  try {
-    await requestStandalone(`/telemetry`, { method: "POST", body: JSON.stringify({ feature }) })
-  } catch {
-    // Intentionally ignored: telemetry is best-effort and must not surface to the user.
-  }
 }
 
 // A paginated endpoint may return a bare array or wrap it in a well-known property.
@@ -209,328 +178,280 @@ export function pageTotal(page: unknown): number | undefined {
   return undefined
 }
 
-// Standalone API pagination: responses are { items, offset, limit, total }. The server may
-// cap the requested limit (default is 20), so trust `total` to know when to stop rather
-// than page fullness.
-async function fetchAllStandalonePages(path: string, pageSize: number): Promise<unknown[]> {
-  const all: unknown[] = []
-  let offset = 0
-  for (;;) {
-    const separator = path.includes("?") ? "&" : "?"
-    const page = await requestStandalone(`${path}${separator}offset=${offset}&limit=${pageSize}`)
-    const items = extractItems(page)
-    all.push(...items)
-    const total = pageTotal(page)
-    const done =
-      items.length === 0 || (total !== undefined ? all.length >= total : items.length < pageSize)
-    if (done) break
-    offset += items.length
-  }
-  return all
-}
+export class RyClient {
+  // A token may span several organizations, and several Confluence instances may be connected.
+  // When there is exactly one of either, resolve it once and remember it for this client.
+  private cachedOrganizationId: number | undefined
+  private cachedInstanceBaseUrl: string | undefined
 
-// GET /organizations on the standalone API: the organizations the token can see
-// (each has an id, a name and a displayName).
-// TODO: confirm the endpoint path and response shape against the real API.
-export async function listOrganizations(): Promise<unknown[]> {
-  return fetchAllStandalonePages(`/organizations`, 100)
-}
+  constructor(private readonly config: RyClientConfig) {}
 
-function organizationIdOf(organization: unknown): number | undefined {
-  if (!organization || typeof organization !== "object") return undefined
-  const id = (organization as Record<string, unknown>).id
-  return typeof id === "number" ? id : undefined
-}
+  // --- Transport ------------------------------------------------------------------------------
 
-let cachedOrganizationId: number | undefined
+  // Token headers (Authorization / X-Api-Key) are NEVER logged; X-Base-Url is (it's the Confluence
+  // instance, not a secret, and it's exactly what you want when debugging instance routing).
+  private async request(url: string, headers: Record<string, string>, init?: RequestInit): Promise<unknown> {
+    const method = init?.method ?? "GET"
+    const baseUrlHeader = headers["X-Base-Url"]
+    logDev(`→ ${method} ${url}${baseUrlHeader ? ` (X-Base-Url: ${baseUrlHeader})` : ""}`)
+    const startedAt = Date.now()
 
-// A token may span several organizations. With a single one, resolve it once and cache
-// it; with several, the user must choose (the organization ID is visible in the
-// Requirement Yogi admin panel in Confluence or Jira).
-async function resolveOrganizationId(): Promise<number | undefined> {
-  if (cachedOrganizationId !== undefined) return cachedOrganizationId
-  // GET /organizations is a best-effort convenience: it lets us scope /applications when the token
-  // spans several organizations. Its path/shape is not yet confirmed against the real API, so a
-  // failure here must NOT sink the single-organization happy path — fall through to an unscoped
-  // /applications call (as if no organization were resolvable) rather than throwing.
-  let organizations: unknown[]
-  try {
-    organizations = await listOrganizations()
-  } catch {
-    return undefined // let /applications decide without an organizationId scope
-  }
-  const ids = [...new Set(organizations.map(organizationIdOf).filter((id): id is number => id !== undefined))]
-  if (ids.length === 0) return undefined // token presumably scoped; let /applications decide
-  if (ids.length === 1) {
-    cachedOrganizationId = ids[0]
-    return cachedOrganizationId
-  }
-  throw new Error(
-    `Several organizations are accessible (ids: ${ids.join(", ")}). Call list_organizations, ask the user which organization to use (the organization ID is visible in the Requirement Yogi admin panel in Confluence or Jira), and pass organization_id explicitly.`
-  )
-}
-
-// GET /applications on the standalone API: the instances linked to Requirement Yogi.
-// Each item carries an id (→ jiraApplicationId for JIRA items), a type
-// ("JIRA" | "CONFLUENCE" | "STANDALONE"), a status ("ACTIVE"…) and, for Jira/Confluence
-// instances, a baseUrl (→ X-Base-Url for Confluence ones). The organization is
-// auto-resolved when not provided.
-export async function listApplications(organizationId?: number): Promise<unknown[]> {
-  const resolvedOrganizationId = organizationId ?? (await resolveOrganizationId())
-  const path =
-    resolvedOrganizationId !== undefined
-      ? `/applications?organizationId=${resolvedOrganizationId}`
-      : `/applications`
-  return fetchAllStandalonePages(path, 100)
-}
-
-function applicationBaseUrl(application: unknown): string | undefined {
-  if (!application || typeof application !== "object") return undefined
-  const baseUrl = (application as Record<string, unknown>).baseUrl
-  return typeof baseUrl === "string" ? baseUrl : undefined
-}
-
-// /applications can list several Confluence AND several Jira instances (plus the
-// standalone app itself); only the active Confluence ones are candidates for X-Base-Url.
-function isActiveConfluenceApplication(application: unknown): boolean {
-  if (!application || typeof application !== "object") return false
-  const record = application as Record<string, unknown>
-  return record.type === "CONFLUENCE" && record.status === "ACTIVE"
-}
-
-let cachedInstanceBaseUrl: string | undefined
-
-// The Confluence API needs the Confluence instance base URL in X-Base-Url. When the token
-// sees a single active Confluence instance, resolve it once via GET /applications and cache
-// it; otherwise the user must choose the instance and the caller passes its base URL.
-async function resolveInstanceBaseUrl(): Promise<string> {
-  if (cachedInstanceBaseUrl) return cachedInstanceBaseUrl
-  const applications = await listApplications()
-  const baseUrls = [
-    ...new Set(
-      applications
-        .filter(isActiveConfluenceApplication)
-        .map(applicationBaseUrl)
-        .filter((url): url is string => !!url)
-    ),
-  ]
-  if (baseUrls.length === 1) {
-    cachedInstanceBaseUrl = baseUrls[0]
-    return cachedInstanceBaseUrl
-  }
-  throw new Error(
-    baseUrls.length === 0
-      ? "Could not resolve a Confluence instance base URL from GET /applications. Call list_applications, ask the user which Confluence instance to use, and pass its base_url explicitly."
-      : `Several Confluence instances are connected (${baseUrls.join(", ")}). Ask the user which instance to use and pass its base_url explicitly.`
-  )
-}
-
-export type SearchOptions = {
-  query: string
-  spaceKey?: string
-  offset?: number
-  instanceBaseUrl?: string
-}
-
-// GET /rest/search on the Confluence API. The query uses the RY custom search
-// syntax (see searchSyntax.ts, surfaced to the LLM in the tool description).
-// The response is a DTOSearchResult<DTORequirement>: { results, offset, limit, total,
-// hasNext, humanReadable?, messageBean }. Links/dependencies are not needed for the
-// linking use case, so their default-true flags are turned off to slim the payload.
-export async function searchRequirements(options: SearchOptions): Promise<unknown> {
-  const params = new URLSearchParams({
-    query: options.query,
-    limit: String(SEARCH_PAGE_SIZE),
-    offset: String(options.offset ?? 0),
-    withLinks: "false",
-    withOriginalLinks: "false",
-    withDependencies: "false",
-  })
-  if (options.spaceKey) params.set("spaceKey", options.spaceKey)
-  return requestConfluence(`/rest/search?${params}`, undefined, options.instanceBaseUrl)
-}
-
-// GET /relationships on the standalone API, paginated with offset/limit.
-// applicationId is required unless the token is already scoped to a single application.
-export async function listAllRelationships(applicationId?: number): Promise<unknown[]> {
-  const path =
-    applicationId !== undefined ? `/relationships?applicationId=${applicationId}` : `/relationships`
-  return fetchAllStandalonePages(path, RELATIONSHIPS_PAGE_SIZE)
-}
-
-// --- Schema grounding: list_searchable_fields -------------------------------------------------
-//
-// Returns the REAL identifiers of a space so the LLM never invents field/property/relationship
-// names. It is built ONLY from confirmed endpoints: the relationship names from /relationships
-// (standalone API), and everything else aggregated from a bounded sample of the space's own
-// requirements via /rest/search (Confluence API). No metadata endpoint is assumed. Categories we
-// cannot yet resolve from those two sources (dedicated variants/baselines/rules/jira-project
-// endpoints are unconfirmed) are returned as whatever the sampled requirements expose, best-effort.
-
-// Cap how many requirements we inspect: distinct identifiers converge fast, and this tool must
-// stay cheap enough to call speculatively before searching.
-const SCHEMA_SAMPLE_MAX = 1000
-
-export type SearchableFields = {
-  space: string
-  properties: string[]
-  external_properties: string[]
-  relationships: string[]
-  variants: string[]
-  baselines: string[]
-  rules: string[]
-  jira_projects: string[]
-  sampled: number
-  notes: string[]
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" ? (value as Record<string, unknown>) : undefined
-}
-
-function stringField(record: Record<string, unknown>, ...names: string[]): string | undefined {
-  for (const name of names) {
-    const value = record[name]
-    if (typeof value === "string" && value.trim()) return value.trim()
-  }
-  return undefined
-}
-
-// A requirement property may be shaped as { label | name, value, external?, type? }. Collect its
-// identifier; classify as external (ext@) when the entry advertises it, otherwise plain (@).
-export function collectProperties(req: Record<string, unknown>, plain: Set<string>, external: Set<string>): void {
-  const properties = req.properties
-  if (!Array.isArray(properties)) return
-  for (const entry of properties) {
-    const record = asRecord(entry)
-    if (!record) continue
-    const label = stringField(record, "label", "name", "key")
-    if (!label) continue
-    const isExternal = record.external === true || record.isExternal === true || record.ext === true
-    ;(isExternal ? external : plain).add(label)
-  }
-}
-
-// Variant, baseline, jira project and rule identifiers are extracted defensively — the DTO may or
-// may not expose them, and we never fail the tool if a shape is missing.
-function collectNamed(value: unknown, into: Set<string>, ...names: string[]): void {
-  const record = asRecord(value)
-  if (record) {
-    const name = stringField(record, ...names)
-    if (name) into.add(name)
-  } else if (typeof value === "string" && value.trim()) {
-    into.add(value.trim())
-  }
-}
-
-function collectJiraProjects(req: Record<string, unknown>, into: Set<string>): void {
-  for (const field of ["jiraLinks", "links", "jira", "jiraIssues"]) {
-    const list = req[field]
-    if (!Array.isArray(list)) continue
-    for (const entry of list) {
-      const record = asRecord(entry)
-      if (record) collectNamed(record, into, "projectKey", "project", "projectName")
+    let response: Response
+    try {
+      response = await fetch(url, {
+        ...init,
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          ...(init?.headers as Record<string, string> | undefined),
+          ...headers,
+        },
+      })
+    } catch (error) {
+      const detail = fetchFailureDetail(error)
+      logDev(`✗ ${method} ${url} — connection failed after ${Date.now() - startedAt}ms: ${detail}`)
+      throw new RyConnectionError(
+        `Connection failed for ${url}: ${detail || "fetch failed"} (dev builds target http://localhost:8082).`,
+        url
+      )
     }
-  }
-}
 
-function collectRules(req: Record<string, unknown>, into: Set<string>): void {
-  for (const field of ["ruleStatuses", "rules", "ruleResults"]) {
-    const list = req[field]
-    if (!Array.isArray(list)) continue
-    for (const entry of list) collectNamed(entry, into, "rule", "ruleName", "label", "name")
-  }
-}
+    const path = new URL(url).pathname
+    logDev(`← ${response.status} ${response.statusText} ${method} ${path} (${Date.now() - startedAt}ms)`)
 
-// Names of every relationship the token can see; these enable from@/to@/parent@/child@/jira@<name>.
-async function relationshipNames(applicationId?: number): Promise<string[]> {
-  const relationships = await listAllRelationships(applicationId)
-  const names = new Set<string>()
-  for (const relationship of relationships) {
-    const record = asRecord(relationship)
-    if (record) collectNamed(record, names, "name", "label")
-  }
-  return [...names]
-}
-
-export async function listSearchableFields(
-  spaceKey: string,
-  applicationId?: number,
-  instanceBaseUrl?: string
-): Promise<SearchableFields> {
-  const notes: string[] = []
-  const properties = new Set<string>()
-  const external = new Set<string>()
-  const variants = new Set<string>()
-  const baselines = new Set<string>()
-  const rules = new Set<string>()
-  const jiraProjects = new Set<string>()
-  let relationships: string[] = []
-  let sampled = 0
-
-  // Relationship names come from a different API (standalone) with its own auth — keep it isolated
-  // so a failure there (e.g. applicationId required) doesn't sink the property discovery.
-  try {
-    relationships = await relationshipNames(applicationId)
-  } catch (error) {
-    notes.push(`Could not list relationships (${(error as Error).message}). Call list_relationships separately.`)
-  }
-
-  // `key ~ '%'` matches every requirement (each has a key), which is exactly the sample we want;
-  // spaceKey scopes it. Bounded by SCHEMA_SAMPLE_MAX so a big space stays cheap.
-  let offset = 0
-  for (;;) {
-    const page = asRecord(await searchRequirements({ query: "key ~ '%'", spaceKey, offset, instanceBaseUrl }))
-    const results = page && Array.isArray(page.results) ? (page.results as unknown[]) : []
-    for (const result of results) {
-      const req = asRecord(result)
-      if (!req) continue
-      sampled++
-      collectProperties(req, properties, external)
-      collectNamed(req.variant ?? req.variantName, variants, "name", "label")
-      collectNamed(req.baseline ?? req.baselineName, baselines, "name", "label")
-      collectJiraProjects(req, jiraProjects)
-      collectRules(req, rules)
+    if (!response.ok) {
+      const body = await response.text().catch(() => "")
+      logDev(`  body: ${body || "(empty)"}`)
+      // The body is relayed VERBATIM: for a malformed RQL query the RY API answers 400 with
+      // "Syntax error at position N: ...", which is exactly what lets the model self-correct.
+      throw new RyApiError(
+        `RY API ${method} ${path} failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ""}`,
+        response.status,
+        method,
+        path,
+        body
+      )
     }
-    const hasNext = page?.hasNext === true
-    offset += results.length
-    if (!hasNext || results.length === 0 || sampled >= SCHEMA_SAMPLE_MAX) {
-      if (hasNext && sampled >= SCHEMA_SAMPLE_MAX) {
-        notes.push(`Property/variant lists sampled from the first ${sampled} requirements; rarely-used ones may be missing.`)
-      }
-      break
+
+    if (response.status === 204) return null
+    // A 2xx can still carry an EMPTY body (e.g. the link service answering a success with nothing).
+    // response.json() throws a raw SyntaxError on "", so read the text: empty → null (the caller
+    // decides what an empty success means — see createJiraLinks), a non-empty body that isn't JSON
+    // becomes a located RyResponseError rather than an opaque SyntaxError.
+    const body = await response.text()
+    if (!body.trim()) return null
+    try {
+      return JSON.parse(body)
+    } catch {
+      throw new RyResponseError(
+        `RY API ${method} ${path} returned a body that is not valid JSON: ${body.slice(0, 200)}`,
+        path
+      )
     }
   }
 
-  if (variants.size === 0) {
-    notes.push("No variant names surfaced from the sample; every space still has a default variant 'Current'.")
+  // New standalone API: Bearer token.
+  private requestStandalone(path: string, init?: RequestInit): Promise<unknown> {
+    return this.request(`${this.config.hosts.standalone}${path}`, { Authorization: `Bearer ${this.config.token}` }, init)
   }
-  if (baselines.size === 0 && rules.size === 0 && jiraProjects.size === 0) {
-    notes.push(
-      "Baselines, rule labels and Jira projects were not exposed by the sampled requirements — treat those as best-effort and confirm names with the user if needed."
+
+  // Old Confluence REST API: X-Api-Key + X-Base-Url headers.
+  private async requestConfluence(path: string, init?: RequestInit, instanceBaseUrl?: string): Promise<unknown> {
+    const baseUrl = instanceBaseUrl ?? (await this.resolveInstanceBaseUrl())
+    return this.request(
+      `${this.config.hosts.confluence}${path}`,
+      { "X-Api-Key": this.config.token, "X-Base-Url": baseUrl },
+      init
     )
   }
 
-  return {
-    space: spaceKey,
-    properties: [...properties].sort(),
-    external_properties: [...external].sort(),
-    relationships: relationships.sort(),
-    variants: [...variants].sort(),
-    baselines: [...baselines].sort(),
-    rules: [...rules].sort(),
-    jira_projects: [...jiraProjects].sort(),
-    sampled,
-    notes,
+  // Standalone API pagination: responses are { items, offset, limit, total }. The server may cap
+  // the requested limit (default is 20), so trust `total` to know when to stop rather than page
+  // fullness.
+  private async fetchAllStandalonePages(path: string, pageSize: number): Promise<unknown[]> {
+    const all: unknown[] = []
+    let offset = 0
+    for (;;) {
+      const separator = path.includes("?") ? "&" : "?"
+      const page = await this.requestStandalone(`${path}${separator}offset=${offset}&limit=${pageSize}`)
+      const items = extractItems(page)
+      all.push(...items)
+      const total = pageTotal(page)
+      const done = items.length === 0 || (total !== undefined ? all.length >= total : items.length < pageSize)
+      if (done) break
+      offset += items.length
+    }
+    return all
+  }
+
+  // --- Instance resolution --------------------------------------------------------------------
+
+  private async resolveOrganizationId(): Promise<number | undefined> {
+    if (this.cachedOrganizationId !== undefined) return this.cachedOrganizationId
+    // GET /organizations is a best-effort convenience: it lets us scope /applications when the
+    // token spans several organizations. Its path/shape is not yet confirmed against the real API,
+    // so a failure here must NOT sink the single-organization happy path — fall through to an
+    // unscoped /applications call (as if no organization were resolvable) rather than throwing.
+    let organizations: Organization[]
+    try {
+      organizations = await this.listOrganizations()
+    } catch {
+      return undefined // let /applications decide without an organizationId scope
+    }
+
+    const ids = [
+      ...new Set(
+        organizations.map((organization) => organization.id).filter((id): id is number => typeof id === "number")
+      ),
+    ]
+    if (ids.length === 0) return undefined // token presumably scoped; let /applications decide
+    if (ids.length === 1) {
+      this.cachedOrganizationId = ids[0]
+      return this.cachedOrganizationId
+    }
+    throw new RyAmbiguityError(
+      `Several organizations are accessible (ids: ${ids.join(", ")}). Call list_organizations to see them; the organization ID is also visible in the Requirement Yogi admin panel in Confluence or Jira.`
+    )
+  }
+
+  // The Confluence API needs the Confluence instance base URL in X-Base-Url. When the token sees a
+  // single active Confluence instance, resolve it once via GET /applications and cache it;
+  // otherwise the user must choose the instance and the caller passes its base URL.
+  private async resolveInstanceBaseUrl(): Promise<string> {
+    if (this.cachedInstanceBaseUrl) return this.cachedInstanceBaseUrl
+
+    // /applications can list several Confluence AND several Jira instances (plus the standalone
+    // app itself); only the active Confluence ones are candidates for X-Base-Url.
+    const applications = await this.listApplications()
+    const baseUrls = [
+      ...new Set(
+        applications
+          .filter(isActiveConfluenceApplication)
+          .map((application) => application.baseUrl)
+          .filter((url): url is string => !!url)
+      ),
+    ]
+
+    if (baseUrls.length === 1) {
+      this.cachedInstanceBaseUrl = baseUrls[0]
+      return this.cachedInstanceBaseUrl
+    }
+    // Zero vs. several are different failures: with none connected there is nothing for the user
+    // to pick, so it's a configuration problem (RyConfigError), not the "ask which one" ambiguity.
+    if (baseUrls.length === 0) {
+      throw new RyConfigError(
+        "No active Confluence instance is connected to Requirement Yogi, so there is no base URL to authenticate the Confluence API with. Ask the user to connect their Confluence instance in the Requirement Yogi admin panel; list_applications shows what is currently connected."
+      )
+    }
+    throw new RyAmbiguityError(`Several Confluence instances are connected (${baseUrls.join(", ")}).`)
+  }
+
+  // --- Endpoints ------------------------------------------------------------------------------
+
+  // POST /telemetry on the standalone API: records which tool (feature) was invoked, so RY can see
+  // which parts of the assistant get used. Best-effort and fire-and-forget: EVERY failure is
+  // swallowed by the caller — telemetry must never block, delay, or break a tool call.
+  async sendTelemetry(feature: string): Promise<void> {
+    await this.requestStandalone(`/telemetry`, { method: "POST", body: JSON.stringify({ feature }) })
+  }
+
+  // GET /organizations on the standalone API: the organizations the token can see
+  // (each has an id, a name and a displayName).
+  // TODO: confirm the endpoint path and response shape against the real API.
+  async listOrganizations(): Promise<Organization[]> {
+    return parseApiItems(
+      OrganizationSchema,
+      await this.fetchAllStandalonePages(`/organizations`, STANDALONE_PAGE_SIZE),
+      "GET /organizations"
+    )
+  }
+
+  // GET /applications on the standalone API: the instances linked to Requirement Yogi. Each item
+  // carries an id (→ jiraApplicationId for JIRA items), a type ("JIRA" | "CONFLUENCE" |
+  // "STANDALONE"), a status ("ACTIVE"…) and, for Jira/Confluence instances, a baseUrl
+  // (→ X-Base-Url for Confluence ones). The organization is auto-resolved when not provided.
+  async listApplications(organizationId?: number): Promise<Application[]> {
+    const resolved = organizationId ?? (await this.resolveOrganizationId())
+    const path = resolved !== undefined ? `/applications?organizationId=${resolved}` : `/applications`
+    return parseApiItems(
+      ApplicationSchema,
+      await this.fetchAllStandalonePages(path, STANDALONE_PAGE_SIZE),
+      "GET /applications"
+    )
+  }
+
+  // GET /relationships on the standalone API, paginated with offset/limit.
+  // applicationId is required unless the token is already scoped to a single application.
+  async listAllRelationships(applicationId?: number): Promise<Relationship[]> {
+    const path = applicationId !== undefined ? `/relationships?applicationId=${applicationId}` : `/relationships`
+    return parseApiItems(
+      RelationshipSchema,
+      await this.fetchAllStandalonePages(path, STANDALONE_PAGE_SIZE),
+      "GET /relationships"
+    )
+  }
+
+  // GET /rest/search on the Confluence API. The query uses the RY custom search syntax (the
+  // reference the LLM gets is src/docs/search-syntax-prompt-v3.md). The response is a
+  // DTOSearchResult<DTORequirement>. Links/dependencies are not needed for the linking use case,
+  // so their default-true flags are turned off to slim the payload.
+  async searchRequirements(options: SearchOptions): Promise<SearchPage> {
+    const params = new URLSearchParams({
+      query: options.query,
+      limit: String(SEARCH_PAGE_SIZE),
+      offset: String(options.offset ?? 0),
+      withLinks: "false",
+      withOriginalLinks: "false",
+      withDependencies: "false",
+    })
+    if (options.spaceKey) params.set("spaceKey", options.spaceKey)
+    return parseApi(
+      SearchPageSchema,
+      await this.requestConfluence(`/rest/search?${params}`, undefined, options.instanceBaseUrl),
+      "GET /rest/search"
+    )
+  }
+
+  // POST /rest/jira-bulk/links on the Confluence API: links a selection of requirements to a set
+  // of Jira issues (numeric IDs) with one relationship.
+  async createJiraLinks(link: JiraBulkLink, instanceBaseUrl?: string): Promise<BulkLinkResult> {
+    const payload = await this.requestConfluence(
+      `/rest/jira-bulk/links`,
+      { method: "POST", body: JSON.stringify(link) },
+      instanceBaseUrl
+    )
+    // A successful link can come back with no body (204, or 200 + empty → null from request()).
+    // That's a success the server chose not to detail, NOT a shape error — return an empty result
+    // rather than running null through parseApi, which would reject it and make createJiraLinkBatch
+    // report a link that WAS created as a failure.
+    if (payload === null) return {}
+    return parseApi(BulkLinkResultSchema, payload, "POST /rest/jira-bulk/links")
   }
 }
 
-// POST /rest/jira-bulk/links on the Confluence API: links a selection of
-// requirements to a set of Jira issues (numeric IDs) with one relationship.
-export async function createJiraLinks(link: JiraBulkLink, instanceBaseUrl?: string): Promise<unknown> {
-  return requestConfluence(
-    `/rest/jira-bulk/links`,
-    { method: "POST", body: JSON.stringify(link) },
-    instanceBaseUrl
-  )
+// --- The shared instance ----------------------------------------------------------------------
+
+let shared: RyClient | undefined
+
+// The client every tool uses. Built on first call (not at import) so a missing token surfaces as a
+// RyConfigError inside a tool call, where registry.ts turns it into a readable result. Not cached
+// on failure, so fixing the environment doesn't require a restart in a long-lived process.
+export function ryClient(): RyClient {
+  if (!shared) shared = new RyClient(resolveConfig())
+  return shared
+}
+
+// Drops the shared instance (and with it the resolved organization/instance caches). For tests.
+export function resetRyClient(): void {
+  shared = undefined
+}
+
+// Best-effort telemetry: EVERY failure (network, auth, missing token/residency) is swallowed here.
+// It must never block, delay, or break a tool call.
+export async function sendTelemetry(feature: string): Promise<void> {
+  try {
+    await ryClient().sendTelemetry(feature)
+  } catch {
+    // Intentionally ignored: telemetry is best-effort and must not surface to the user.
+  }
 }

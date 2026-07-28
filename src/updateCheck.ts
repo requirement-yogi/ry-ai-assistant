@@ -1,8 +1,8 @@
 // Session-level update check state, shared by the check_for_updates tool (on-demand) and the
-// automatic once-per-session banner injected through withTelemetry (src/tools/telemetry.ts).
+// automatic once-per-session banner injected through withTelemetry (src/tools/registry.ts).
 //
-// Why a standalone module: telemetry.ts needs the banner and updates.ts needs the full summary,
-// but updates.ts already imports telemetry.ts (registerTool) — putting the state in either would
+// Why a standalone module: registry.ts needs the banner and updates.ts needs the full summary,
+// but updates.ts already imports registry.ts (registerTool) — putting the state in either would
 // create an import cycle. This module imports neither, so both can depend on it cleanly.
 //
 // The GitHub round-trip runs ONCE per process (≈ once per session for a stdio server) and its

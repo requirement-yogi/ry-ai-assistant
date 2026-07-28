@@ -1,0 +1,12 @@
+{
+  // Type-checks the tests (and the src they import) WITHOUT emitting — the build (../tsconfig.json)
+  // never sees test files, so this is the only place they get compiled. Editors also pick this up
+  // as the nearest project for files under tests/, so type errors show up in-editor too.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // The base pins rootDir to ./src; widen it to the repo root so both trees are valid inputs.
+    "rootDir": ".."
+  },
+  "include": ["**/*.ts", "../src/**/*.ts"]
+}

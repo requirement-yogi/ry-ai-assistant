@@ -1,6 +1,6 @@
 {
   "name": "ry-ai-assistant",
-  "version": "0.2.0-beta",
+  "version": "0.2.1-beta",
   "description": "MCP server to create and edit Confluence pages with Requirement Yogi macros from an LLM.",
   "type": "module",
   "main": "dist/index.js",
@@ -16,9 +16,13 @@
   "scripts": {
     "generate:docs": "node scripts/embed-docs.mjs",
     "compile": "npm run generate:docs && rimraf dist && tsc",
+    "pretypecheck": "npm run generate:docs",
+    "typecheck": "tsc -p tests/tsconfig.json",
     "build": "npm run compile && npm run build:prod && npm run build:dev && npm run build:mcpb",
     "start": "node dist/index.js",
+    "pretest": "npm run generate:docs",
     "test": "vitest run",
+    "pretest:watch": "npm run generate:docs",
     "test:watch": "vitest",
     "build:prod": "npm run generate:docs && node scripts/build-bundle.mjs prod",
     "build:dev": "npm run generate:docs && node scripts/build-bundle.mjs dev",

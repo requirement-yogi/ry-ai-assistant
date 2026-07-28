@@ -4,6 +4,8 @@
 // rate-limited, no release yet) yields a "couldn't check" result instead of throwing, so the
 // update check never disrupts a session.
 
+import { z } from "zod"
+
 const LATEST_RELEASE_URL = "https://api.github.com/repos/requirement-yogi/ry-ai-assistant/releases/latest"
 
 // GitHub requires a User-Agent on every request and rejects requests without one.
@@ -15,19 +17,23 @@ const REQUEST_TIMEOUT_MS = 4000
 // The release page body can be long; keep the notes surfaced to the model bounded.
 const MAX_NOTES_CHARS = 4000
 
-export type UpdateCheck = {
-  current_version: string
+// Declared as a schema rather than a bare type so check_for_updates can publish it as its MCP
+// outputSchema without restating the shape (and drifting from it).
+export const UpdateCheckSchema = z.object({
+  current_version: z.string().describe("The version of the MCP server currently running"),
   // The following are absent when the check couldn't complete (see `checked`).
-  latest_version?: string
-  update_available?: boolean
-  release_name?: string
-  release_url?: string
-  published_at?: string
-  release_notes?: string
+  latest_version: z.string().optional().describe("Version of the latest GitHub release"),
+  update_available: z.boolean().optional().describe("True when the latest release is newer than the running version"),
+  release_name: z.string().optional(),
+  release_url: z.string().optional(),
+  published_at: z.string().optional(),
+  release_notes: z.string().optional().describe("Release notes, truncated"),
   // false when GitHub couldn't be reached / has no release yet; `note` explains why.
-  checked: boolean
-  note?: string
-}
+  checked: z.boolean().describe("False when the check could not complete; `note` says why"),
+  note: z.string().optional(),
+})
+
+export type UpdateCheck = z.infer<typeof UpdateCheckSchema>
 
 type GithubRelease = {
   tag_name?: string

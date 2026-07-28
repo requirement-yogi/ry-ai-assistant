@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest"
-import { buildInlineExtension } from "./macro.js"
+import { buildInlineExtension } from "../../src/tools/macro.js"
 
 const APP_ID = "2237ccc1-3339-4360-9e41-d8b594746224"
 const PROD_ENVIRONMENT_ID = "126ed95b-265f-4505-988f-39c68147fb29"

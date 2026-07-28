@@ -1,16 +1,11 @@
 import { z } from "zod"
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
-import {
-  listOrganizations,
-  listApplications,
-  searchRequirements,
-  listSearchableFields,
-  listAllRelationships,
-  createJiraLinks,
-  type JiraBulkLink,
-} from "../api/ryClient.js"
-import { SEARCH_SYNTAX } from "./searchSyntax.js"
-import { registerTool, TOOL_NAMES } from "./telemetry.js"
+import { ryClient } from "../api/ryClient.js"
+import { ApplicationSchema, OrganizationSchema, RelationshipSchema, type Requirement, type SearchPage } from "../api/dto.js"
+import { listSearchableFields, SearchableFieldsSchema } from "../services/schemaGrounding.js"
+import { createJiraLinkBatch, formatLinkReport, LinkReportSchema } from "../services/jiraLinking.js"
+import { registerTool, TOOL_NAMES, READS_REMOTE_STATE, CREATES_LINKS } from "./registry.js"
+import { RyApiError } from "../errors.js"
 
 // Use case 3: link Requirement Yogi requirements to Jira issues.
 //
@@ -22,31 +17,9 @@ import { registerTool, TOOL_NAMES } from "./telemetry.js"
 //                                  user chose how to structure them (delegated, not here)
 //   4. list_relationships        → discover the available relationship types (RY standalone API)
 //   5. link_requirements_to_jira → create the links (RY jira-bulk link service)
-
-const WORKFLOW = `Full workflow for linking requirements to Jira issues (you orchestrate it):
-1. Call list_applications to discover the Confluence and Jira instances connected to
-   Requirement Yogi (each item has an id, a type "JIRA" | "CONFLUENCE" | "STANDALONE",
-   a status, and a baseUrl). If it fails because several organizations are accessible,
-   call list_organizations, ask the user which organization to use (the organization ID
-   is visible in the Requirement Yogi admin panel in Confluence or Jira), then retry
-   with organization_id. Then:
-   - JIRA items give the jira_application_id needed for linking; if several Jira instances
-     are connected, ask the user which one to use.
-   - CONFLUENCE items give the base URL: with a single active Confluence instance it is
-     resolved automatically; if several are connected, ask the user which instance the
-     requirements live on and pass its base URL as base_url to search_requirements and
-     link_requirements_to_jira.
-2. Call search_requirements with a query in the RY search syntax to discover the Requirement
-   Yogi requirements: their IDs, and the containerId/variantId needed later to build the
-   link selection.
-3. Find or create the Jira issues with the Atlassian MCP tools (e.g. searchJiraIssuesUsingJql,
-   createJiraIssue). BEFORE creating any issue, ask the user how they want the Jira side
-   structured: one issue per requirement or grouped? Epics, sub-tasks or plain issues?
-   Which project, issue type, parent, sprint? Do NOT create anything until the user has
-   confirmed the whole plan. Linking needs the NUMERIC Jira issue IDs, not the PROJ-123 keys.
-4. Call list_relationships and let the user pick which relationship type the links should use
-   (ask unless it is unambiguous).
-5. Call link_requirements_to_jira with one entry per (requirement selection, issues, relationship).`
+//
+// The descriptions the LLM reads live in src/prompts/tools/<tool name>.md; the workflow above is
+// spelled out for it once in src/prompts/fragments/jira-workflow.md and included by each of them.
 
 // The /rest/search response is a DTOSearchResult<DTORequirement>. A full DTORequirement is
 // huge (storage data, recursive dependencies, rules…); trim each result to the fields that
@@ -63,55 +36,38 @@ const REQUIREMENT_SUMMARY_FIELDS = [
   "properties",
 ] as const
 
-function summarizeRequirement(item: unknown): unknown {
-  if (!item || typeof item !== "object") return item
-  const record = item as Record<string, unknown>
+// Nulls are dropped as well as undefined: the DTO accepts null for every optional field (the API
+// sends both), and an explicit `"key": null` is noise in a tool result.
+function summarizeRequirement(requirement: Requirement): Record<string, unknown> {
   const summary: Record<string, unknown> = {}
   for (const field of REQUIREMENT_SUMMARY_FIELDS) {
-    if (record[field] !== undefined && record[field] !== null) summary[field] = record[field]
+    const value = requirement[field]
+    if (value !== undefined && value !== null) summary[field] = value
   }
   return summary
 }
 
-export function summarizeSearchPage(page: unknown): unknown {
-  if (!page || typeof page !== "object" || !Array.isArray((page as Record<string, unknown>).results)) {
-    return page
-  }
-  const record = page as Record<string, unknown>
-  const requirements = (record.results as unknown[]).map(summarizeRequirement)
+export function summarizeSearchPage(page: SearchPage) {
+  const requirements = (page.results ?? []).map(summarizeRequirement)
+  // Only claim a total we actually know. The API usually sends `total`; when it doesn't, this page
+  // is the whole result set ONLY if there are no more pages (no hasNext). Reporting `returned` as
+  // the total when hasNext is true would tell the model the query is well-scoped and stop it
+  // paginating, silently missing the rest — so leave total_count out and let hasNext drive paging.
+  const totalCount =
+    typeof page.total === "number" ? page.total : page.hasNext ? undefined : requirements.length
   return {
     // Lead with the total: discovery is iterative and the model needs the volume to judge whether
     // the query is too broad or too narrow before drilling into the returned page.
-    total_count: typeof record.total === "number" ? record.total : requirements.length,
+    ...(totalCount !== undefined ? { total_count: totalCount } : {}),
     returned: requirements.length,
-    offset: record.offset,
-    limit: record.limit,
-    hasNext: record.hasNext,
+    offset: page.offset ?? undefined,
+    limit: page.limit ?? undefined,
+    hasNext: page.hasNext ?? undefined,
     // How the server understood the query, and any warnings — useful to double-check it.
-    ...(record.humanReadable != null ? { humanReadable: record.humanReadable } : {}),
-    ...(record.messageBean != null ? { messageBean: record.messageBean } : {}),
+    ...(page.humanReadable != null ? { humanReadable: page.humanReadable } : {}),
+    ...(page.messageBean != null ? { messageBean: page.messageBean } : {}),
     requirements,
   }
-}
-
-// POST /rest/jira-bulk/links answers with a DTOJiraBulkLinkResult:
-// { linkedCount, skippedCount (link already existed), unauthorizedCount (issues the
-// user cannot read) }.
-export function formatBulkLinkResult(result: unknown): string {
-  if (result && typeof result === "object") {
-    const record = result as Record<string, unknown>
-    if (typeof record.linkedCount === "number") {
-      const parts = [`${record.linkedCount} link(s) created`]
-      if (typeof record.skippedCount === "number" && record.skippedCount > 0) {
-        parts.push(`${record.skippedCount} skipped (link already existed)`)
-      }
-      if (typeof record.unauthorizedCount === "number" && record.unauthorizedCount > 0) {
-        parts.push(`${record.unauthorizedCount} unauthorized (the user cannot read those Jira issues)`)
-      }
-      return parts.join(", ")
-    }
-  }
-  return JSON.stringify(result)
 }
 
 export const SelectionSchema = z
@@ -138,6 +94,13 @@ export const SelectionSchema = z
     message: "query is required (and must be non-empty) when select_all is true",
     path: ["query"],
   })
+  // The mirror image: when NOT select_all the set is the explicit ID list, so it must be non-empty.
+  // Otherwise the RY link service receives selectAll:false with an empty ID list, silently links
+  // nothing (the query is ignored server-side in this mode), and reports a misleading success.
+  .refine((selection) => selection.select_all || (selection.selected_requirement_ids?.length ?? 0) > 0, {
+    message: "selected_requirement_ids must be non-empty unless select_all is true (use select_all with a query to link every match)",
+    path: ["selected_requirement_ids"],
+  })
   .describe("Which requirements this link applies to")
 
 export function registerJiraLinkTools(server: McpServer) {
@@ -145,32 +108,23 @@ export function registerJiraLinkTools(server: McpServer) {
     server,
     TOOL_NAMES.listOrganizations,
     {
-      description: `USE THIS TOOL to discover the Requirement Yogi organizations the access token can see. You normally DON'T need it: with a single organization everything is resolved automatically. Use it only when another tool failed because several organizations are accessible.
-
-Returns the organizations as JSON (id, name, displayName). Ask the user which organization to use — they can find their organization ID in the Requirement Yogi admin panel in Confluence or Jira — then pass it as organization_id to list_applications.
-
-${WORKFLOW}`,
+      annotations: READS_REMOTE_STATE,
       inputSchema: {},
+      outputSchema: { organizations: z.array(OrganizationSchema) },
     },
     async () => {
-      try {
-        const organizations = await listOrganizations()
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Accessible organizations (JSON from the Requirement Yogi API):
+      const organizations = await ryClient().listOrganizations()
+      return {
+        structuredContent: { organizations },
+        content: [
+          {
+            type: "text",
+            text: `Accessible organizations (JSON from the Requirement Yogi API):
 ${JSON.stringify(organizations)}
 
 If there are several, ask the user which one to use (the organization ID is visible in the Requirement Yogi admin panel in Confluence or Jira), then pass it as organization_id to list_applications.`,
-            },
-          ],
-        }
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `list_organizations failed: ${(error as Error).message}` }],
-          isError: true,
-        }
+          },
+        ],
       }
     }
   )
@@ -179,20 +133,8 @@ If there are several, ask the user which one to use (the organization ID is visi
     server,
     TOOL_NAMES.listApplications,
     {
-      description: `USE THIS TOOL to discover the Confluence and Jira instances connected to Requirement Yogi, typically as the first step of linking requirements to Jira issues.
-
-Returns the applications as JSON (all pages are fetched for you). Each item has an id, a type ("JIRA" | "CONFLUENCE" | "STANDALONE"), a status, and a baseUrl. Keep from the results:
-- the id of the JIRA application: it is the jira_application_id required by
-  link_requirements_to_jira (and the application_id accepted by list_relationships).
-  If several Jira instances are connected, ask the user which one to use.
-- the baseUrl of the CONFLUENCE instance: with a single active one it is resolved
-  automatically; if several are connected, ask the user which instance the requirements
-  live on and pass its baseUrl as base_url to search_requirements and
-  link_requirements_to_jira.
-
-If this tool fails because several organizations are accessible, call list_organizations, ask the user which organization to use, and retry with organization_id.
-
-${WORKFLOW}`,
+      annotations: READS_REMOTE_STATE,
+      outputSchema: { applications: z.array(ApplicationSchema) },
       inputSchema: {
         organization_id: z
           .number()
@@ -204,24 +146,18 @@ ${WORKFLOW}`,
       },
     },
     async ({ organization_id }) => {
-      try {
-        const applications = await listApplications(organization_id)
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Connected applications (JSON from the Requirement Yogi API):
+      const applications = await ryClient().listApplications(organization_id)
+      return {
+        structuredContent: { applications },
+        content: [
+          {
+            type: "text",
+            text: `Connected applications (JSON from the Requirement Yogi API):
 ${JSON.stringify(applications)}
 
 Keep the application IDs (jira_application_id) and base URLs (base_url) for the next steps.`,
-            },
-          ],
-        }
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `list_applications failed: ${(error as Error).message}` }],
-          isError: true,
-        }
+          },
+        ],
       }
     }
   )
@@ -230,18 +166,8 @@ Keep the application IDs (jira_application_id) and base URLs (base_url) for the 
     server,
     TOOL_NAMES.listSearchableFields,
     {
-      description: `USE THIS TOOL to discover the REAL searchable identifiers of a Confluence space before you write an RQL query. CALL THIS FIRST whenever you are not sure which fields, properties or relationships a space actually has — it is what prevents you from inventing names that don't exist.
-
-Returns JSON with, for the given space:
-- properties: the requirement property names → use as @Name (e.g. @Priority).
-- external_properties: typed/external property names → use as ext@Name (support > >= < <=).
-- relationships: relationship names → use as from@Name / to@Name / parent@Name / child@Name / jira@Name.
-- variants, baselines, rules, jira_projects: names for variant/baseline/ruleStatus@/project conditions (best-effort — see notes).
-- sampled: how many requirements were inspected; notes: caveats.
-
-Escape spaces in a name with a backslash when writing the query (e.g. @Main\\ Category). Build the query with search_requirements using ONLY the identifiers returned here (plus the always-available core fields: key, text, page, status, jira…).
-
-${WORKFLOW}`,
+      annotations: READS_REMOTE_STATE,
+      outputSchema: SearchableFieldsSchema.shape,
       inputSchema: {
         space: z.string().min(1).describe("The Confluence space key whose searchable fields you want"),
         application_id: z
@@ -260,24 +186,18 @@ ${WORKFLOW}`,
       },
     },
     async ({ space, application_id, base_url }) => {
-      try {
-        const fields = await listSearchableFields(space, application_id, base_url)
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Searchable fields for space "${space}" (JSON from the Requirement Yogi API):
+      const fields = await listSearchableFields({ spaceKey: space, applicationId: application_id, instanceBaseUrl: base_url })
+      return {
+        structuredContent: fields,
+        content: [
+          {
+            type: "text",
+            text: `Searchable fields for space "${space}" (JSON from the Requirement Yogi API):
 ${JSON.stringify(fields)}
 
 Use ONLY these identifiers when writing the query for search_requirements (plus the core fields key/text/page/status/jira). Prefix them per the syntax: @property, ext@property, from@/to@/jira@relationship.`,
-            },
-          ],
-        }
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `list_searchable_fields failed: ${(error as Error).message}` }],
-          isError: true,
-        }
+          },
+        ],
       }
     }
   )
@@ -286,21 +206,18 @@ Use ONLY these identifiers when writing the query for search_requirements (plus 
     server,
     TOOL_NAMES.searchRequirements,
     {
-      description: `USE THIS TOOL when the user wants to find their Requirement Yogi requirements, typically as the first step of linking them to Jira issues.
-
-Searches the requirements through the Requirement Yogi API. Returns { total_count, returned, requirements: [...first page...] } — never a raw list. total_count is the FULL number of matches (the requirements array is just the current page): use it to judge whether the query is too broad (refine/add conditions) or too narrow (loosen it) before drilling in. Discovery is iterative — expect to run several queries. Each requirement is trimmed to the linking essentials: id, key, text, applicationId, containerId, variantId, status, canonicalURL, properties. Keep the id and the containerId/variantId: link_requirements_to_jira needs them. The response also echoes how the server understood the query (humanReadable) and any warnings (messageBean).
-
-YOU write the query: translate the user's request into the Requirement Yogi RQL search syntax using the reference below. Results are paginated by 200: if hasNext is true, call again with offset = offset + limit.
-
-GROUNDING: to avoid inventing field/property/relationship/variant names, call list_searchable_fields(space) FIRST whenever you are not certain which identifiers a space actually has.
-
-SELF-CORRECTION: if the query has a syntax error the tool returns the server's RQL parse error verbatim (e.g. "Syntax error at position N: ..."). Read it, fix the query, and resubmit.
-
-CRITICAL: the query is a structured "field operator value" expression, never a free-text search box. A bare key or word is invalid — e.g. to find requirement BREW-F-01 send key = 'BREW-F-01', NOT BREW-F-01 on its own. When no field is specified, default to \`key\`.
-
-${SEARCH_SYNTAX}
-
-${WORKFLOW}`,
+      annotations: READS_REMOTE_STATE,
+      // No outputSchema here on purpose: the MCP spec asks a tool that returns structuredContent to
+      // ALSO serialise it into a text block for older clients, so declaring one would send a page of
+      // up to 200 requirements twice. The small, bounded discovery tools pay that cost happily; this
+      // one doesn't.
+      // A 400 here is almost always a malformed RQL query. RyApiError already relays the server's
+      // "Syntax error at position N: ..." verbatim and says to fix the input; what the generic
+      // taxonomy can't know is that the cure for an invented field name is schema grounding.
+      errorGuidance: (error) =>
+        error instanceof RyApiError && error.status === 400
+          ? "If the error points at a field, property or relationship name, call list_searchable_fields(space) to get the real identifiers of that space before rewriting the query."
+          : undefined,
       inputSchema: {
         query: z
           .string()
@@ -319,33 +236,19 @@ ${WORKFLOW}`,
       },
     },
     async ({ query, space_key, offset, base_url }) => {
-      try {
-        const page = await searchRequirements({ query, spaceKey: space_key, offset, instanceBaseUrl: base_url })
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Requirements found (JSON from the Requirement Yogi API):
+      const page = await ryClient().searchRequirements({ query, spaceKey: space_key, offset, instanceBaseUrl: base_url })
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Requirements found (JSON from the Requirement Yogi API):
 ${JSON.stringify(summarizeSearchPage(page))}
 
-total_count is the full number of matches; requirements is just this page. If it's too broad or too narrow, refine the query and search again.
+total_count (when present) is the full number of matches; requirements is just this page. If it's too broad or too narrow, refine the query and search again.
 Keep each requirement's id and its containerId/variantId: link_requirements_to_jira needs them.
-If hasNext is true, call search_requirements again with offset = offset + limit for the next page.`,
-            },
-          ],
-        }
-      } catch (error) {
-        // Relay parse errors VERBATIM (the RY API answers a bad query with 400 + "Syntax error at
-        // position N: ...") so the model can correct the RQL and resubmit — never mask it.
-        const message = (error as Error).message
-        const looksLikeParseError = /\b400\b|syntax error|parse|position \d/i.test(message)
-        const guidance = looksLikeParseError
-          ? "The query could not be parsed. Read the syntax error above, fix the RQL query, and call search_requirements again. If unsure which fields/properties exist, call list_searchable_fields(space) first."
-          : "Search failed for a non-syntax reason (auth, connectivity, or instance selection). Fix the cause and retry."
-        return {
-          content: [{ type: "text", text: `search_requirements failed: ${message}\n\n${guidance}` }],
-          isError: true,
-        }
+Do NOT assume this page is complete from its size alone: if hasNext is true there are more matches — call search_requirements again with offset = offset + limit for the next page.`,
+          },
+        ],
       }
     }
   )
@@ -354,13 +257,8 @@ If hasNext is true, call search_requirements again with offset = offset + limit 
     server,
     TOOL_NAMES.listRelationships,
     {
-      description: `USE THIS TOOL to discover the relationship types available in Requirement Yogi before linking requirements to Jira issues.
-
-A link between a requirement and a Jira issue is qualified by a relationship (e.g. "implements", "is tested by"). Returns every relationship with its ID (all pages are fetched for you).
-
-Present the choices to the user and let them pick the relationship to use, unless it is unambiguous.
-
-${WORKFLOW}`,
+      annotations: READS_REMOTE_STATE,
+      outputSchema: { relationships: z.array(RelationshipSchema) },
       inputSchema: {
         application_id: z
           .number()
@@ -372,24 +270,18 @@ ${WORKFLOW}`,
       },
     },
     async ({ application_id }) => {
-      try {
-        const relationships = await listAllRelationships(application_id)
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Available relationships (JSON from the Requirement Yogi API):
+      const relationships = await ryClient().listAllRelationships(application_id)
+      return {
+        structuredContent: { relationships },
+        content: [
+          {
+            type: "text",
+            text: `Available relationships (JSON from the Requirement Yogi API):
 ${JSON.stringify(relationships)}
 
 Keep the relationship IDs: they are needed by link_requirements_to_jira.`,
-            },
-          ],
-        }
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `list_relationships failed: ${(error as Error).message}` }],
-          isError: true,
-        }
+          },
+        ],
       }
     }
   )
@@ -398,17 +290,8 @@ Keep the relationship IDs: they are needed by link_requirements_to_jira.`,
     server,
     TOOL_NAMES.linkRequirementsToJira,
     {
-      description: `USE THIS TOOL as the FINAL step when the user wants to link Requirement Yogi requirements to Jira issues.
-
-Creates the links through the Requirement Yogi link service. Each entry links a SELECTION of requirements (explicit IDs, or a query with select_all) to a set of Jira issues with one relationship — e.g. "one issue per requirement" is one entry per pair, while "these 5 requirements all relate to this epic" is a single entry.
-
-Requirements: use the IDs and container/variant IDs from search_requirements.
-Jira issues: NUMERIC issue IDs (not PROJ-123 keys) — resolve them with the Atlassian MCP tools, which also handle finding or creating the issues.
-Relationship: ID from list_relationships.
-
-Only call it once the Jira issues exist and the user has confirmed the plan (issue structure AND relationship type).
-
-${WORKFLOW}`,
+      annotations: CREATES_LINKS,
+      outputSchema: LinkReportSchema.shape,
       inputSchema: {
         links: z
           .array(
@@ -436,47 +319,13 @@ ${WORKFLOW}`,
       },
     },
     async ({ links, base_url }) => {
-      const created: string[] = []
-      const failed: string[] = []
-
-      for (const link of links) {
-        const bulkLink: JiraBulkLink = {
-          selection: {
-            query: link.selection.query,
-            containerId: link.selection.container_id,
-            variantId: link.selection.variant_id,
-            selectedRequirementIds: link.selection.selected_requirement_ids ?? [],
-            excludedRequirementIds: link.selection.excluded_requirement_ids ?? [],
-            selectAll: link.selection.select_all ?? false,
-          },
-          jiraApplicationId: link.jira_application_id,
-          issueIds: link.issue_ids,
-          relationshipId: link.relationship_id,
-        }
-        const requirementsLabel = bulkLink.selection.selectAll
-          ? `query "${bulkLink.selection.query}"`
-          : `requirements [${bulkLink.selection.selectedRequirementIds.join(", ")}]`
-        const label = `${requirementsLabel} → issues [${bulkLink.issueIds.join(", ")}] (relationship ${bulkLink.relationshipId})`
-        try {
-          const result = await createJiraLinks(bulkLink, base_url)
-          created.push(`${label}: ${formatBulkLinkResult(result)}`)
-        } catch (error) {
-          failed.push(`${label}: ${(error as Error).message}`)
-        }
-      }
-
-      const report = [
-        created.length
-          ? `Completed ${created.length} link operation(s):\n${created.join("\n")}`
-          : "No link operation completed.",
-        failed.length ? `Failed ${failed.length} link operation(s):\n${failed.join("\n")}` : "",
-      ]
-        .filter(Boolean)
-        .join("\n\n")
-
+      const report = await createJiraLinkBatch(links, { instanceBaseUrl: base_url })
       return {
-        content: [{ type: "text", text: report }],
-        ...(created.length === 0 ? { isError: true } : {}),
+        structuredContent: report,
+        content: [{ type: "text", text: formatLinkReport(report) }],
+        // Only an all-or-nothing failure is an error: a partially successful batch DID create
+        // links, and reporting it as an error would push the model to retry them.
+        ...(report.completed === 0 && report.failed > 0 ? { isError: true } : {}),
       }
     }
   )

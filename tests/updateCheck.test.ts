@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
-import { formatUpdateBanner, formatUpdateSummary } from "./updateCheck.js"
-import type { UpdateCheck } from "./api/githubReleases.js"
+import { formatUpdateBanner, formatUpdateSummary } from "../src/updateCheck.js"
+import type { UpdateCheck } from "../src/api/githubReleases.js"
 
 const UPDATE: UpdateCheck = {
   current_version: "0.2.0-beta",

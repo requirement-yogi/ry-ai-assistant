@@ -28,6 +28,7 @@ npm run build:prod   # prod bundle only → standalone/ry-ai-assistant.mjs
 npm run build:dev    # dev bundle only  → standalone/ry-ai-assistant-dev.mjs (dev mode baked in)
 npm run compile      # tsc only → dist/ (also what `prepare`/`npm install` runs)
 npm start            # run the compiled dist build (node dist/index.js)
+npm test             # vitest (runs generate:docs first — the prompt/version modules are codegen)
 ```
 
 The dev/prod split is **fully baked at build time** by `scripts/build-bundle.mjs` (esbuild `define`).
@@ -55,37 +56,97 @@ internal only and must not be referenced in the public README.
 
 ## Architecture
 
+Four layers, each depending only on the one below it:
+
+```
+tools/      MCP adapters — schemas in, tool result out. No business logic, no catch blocks.
+services/   business logic — what to sample, how to batch, how to report. Knows nothing of MCP.
+api/        transport + typed frontier with the RY APIs. Knows nothing of tools or MCP.
+prompts/    what the LLM reads. Markdown, no code.
+```
+
 ```
 src/
 ├── index.ts                  # MCP server (version from version.generated.ts), sets `instructions`, starts the update check, registers the 9 tools
 ├── version.generated.ts      # AUTO-GENERATED from package.json by embed-docs.mjs — the server's own version (single source: package.json)
-├── updateCheck.ts            # session-level update-check state: caches the GitHub check + emits the once-per-session "update available" banner (shared by updates.ts and telemetry.ts, no import cycle)
+├── errors.ts                 # the error taxonomy: RyConfigError / RyAmbiguityError / RyConnectionError / RyApiError / RyResponseError. Each carries the `guidance` (what to DO), written once here instead of per tool; formatToolFailure renders a failure for the LLM
+├── log.ts                    # logDev — dev-only tracing to STDERR (STDOUT is the JSON-RPC stream). Never logs tokens or tool arguments
+├── updateCheck.ts            # session-level update-check state: caches the GitHub check + emits the once-per-session "update available" banner (shared by updates.ts and registry.ts, no import cycle)
 ├── schemas/requirements.ts   # Zod schema + TypeScript types for the requirements tree
-├── api/
-│   ├── ryClient.ts           # HTTP client for the RY APIs (applications, search, relationships, links). In dev (RY_ENV=dev) traces every call to STDERR ([ry-dev] → method/url, ← status/ms, ✗ cause); tokens are never logged. Connection failures surface error.cause (ECONNREFUSED/ENOTFOUND/…) instead of a bare "fetch failed".
+├── prompts/                  # EVERYTHING the LLM reads — markdown only, no logic
+│   ├── tools/<tool name>.md  # one description per tool; the basename IS the tool name
+│   ├── fragments/*.md        # shared blocks included by the above: jira-workflow, key-rules, indexing-contexts, search-syntax
+│   ├── descriptions.ts       # typed accessor; a missing .md (or an orphan one) is a COMPILE error
+│   └── index.generated.ts    # AUTO-GENERATED from the .md by embed-docs.mjs (includes resolved, HTML comments stripped)
+├── api/                      # transport only — no business logic
+│   ├── dto.ts                # Zod schemas for every RY response + parseApi/parseApiItems. Deliberately lenient (loose objects, optional/nullish fields) since the endpoints are still being confirmed; a mismatch throws a located RyResponseError instead of a silent undefined
+│   ├── ryClient.ts           # RyClient class (caches = instance fields, so tests get a clean one) + the lazily-built shared `ryClient()`. In dev traces every call to STDERR; tokens are never logged. Connection failures surface error.cause (ECONNREFUSED/…) instead of a bare "fetch failed"
 │   └── githubReleases.ts     # update check: GET the latest GitHub release + semver compare (best-effort, never throws)
-└── tools/
-    ├── updates.ts            # check_for_updates — ON-DEMAND "is this MCP up to date?" tool (the automatic once-per-session banner is injected by telemetry.ts, not this tool)
+├── services/                 # business logic, MCP-agnostic. Each takes an injectable `api` (a Pick<RyClient, …>) so it is testable without a network
+│   ├── schemaGrounding.ts    # list_searchable_fields: bounded sampling of a space to return its REAL identifiers
+│   └── jiraLinking.ts        # MCP snake_case → DTORequirementSelection, batch execution with per-operation partial failure, report rendering
+└── tools/                    # MCP adapters only
+    ├── toolNames.ts          # TOOL_NAMES + ToolName — single source of truth, own module so prompts/ can check against it
+    ├── registry.ts           # THE choke point: registerTool wires description + telemetry + error handling + dev trace + update banner from the tool name alone. Also the shared `annotations` presets
+    ├── updates.ts            # check_for_updates — ON-DEMAND "is this MCP up to date?" tool (the automatic once-per-session banner is injected by registry.ts, not this tool)
     ├── buildAdf.ts           # build_requirements_adf — tool wrapper (use case 1)
     ├── editPage.ts           # edit_page_requirements — analyze + reshape an existing page (use case 2)
     ├── jiraLinks.ts          # the 6 use-case-3 tools (organizations, applications, searchable-fields, search, relationships, links)
-    ├── searchSyntax.ts       # SEARCH_SYNTAX — RQL reference surfaced to the LLM; loaded from docs/search-syntax-prompt-v3.md (never hardcoded)
     ├── adfRender.ts          # shared deterministic renderers: tree→ADF, table, paragraph (the RY intelligence)
-    ├── macro.ts              # buildInlineExtension — shared RY macro node, single source of truth
-    ├── indexingRules.ts      # KEY_RULES + INDEXING_CONTEXTS — the RY rules surfaced to the LLM
-    └── telemetry.ts          # TOOL_NAMES (single source of truth for tool names) + registerTool/withTelemetry: registers a tool, fires a best-effort POST /telemetry (feature = tool name) on every call, AND prepends the once-per-session update banner to the first tool result (takeReadyUpdateNotice) — the single choke point every tool passes through
+    └── macro.ts              # buildInlineExtension — shared RY macro node, single source of truth
 docs/
     └── search-syntax-prompt-v3.md   # AUTHORITATIVE RQL syntax (from the backend ANTLR grammar + DSL eval); single source of truth
 scripts/
-    ├── embed-docs.mjs        # build-time codegen: docs/*.md → src/docs/*.generated.ts (imported by both tsc and esbuild builds)
+    ├── embed-docs.mjs        # build-time codegen: src/prompts/**/*.md → src/prompts/index.generated.ts (imported by both tsc and esbuild builds)
     └── build-bundle.mjs      # esbuild bundler: bakes env-specific values via `define` (RY_ENV + dev's .env.dev) → standalone/*.mjs
+tests/                        # unit tests, MIRRORING the src/ tree (tests/api/dto.test.ts ↔ src/api/dto.ts)
 ```
 
-The RQL reference is written **once** in `src/docs/search-syntax-prompt-v3.md`. `scripts/embed-docs.mjs`
-(run by `generate:docs`, and automatically by `compile`/`bundle`) embeds it into a git-ignored
-`*.generated.ts` module, so `searchSyntax.ts` imports it and it can never drift — edit the markdown,
-never re-hardcode the syntax. Codegen (rather than a runtime `readFileSync`) is what lets the same
-import work in both the `tsc`→`dist/` build and the self-contained esbuild `.mjs` bundle.
+### Tests
+
+Tests live under `tests/` at the repo root, mirroring `src/` (`tests/api/dto.test.ts` covers
+`src/api/dto.ts`), and import the code under test with a `../../src/…` relative path. They are kept
+out of `src/` on purpose: `tsconfig` builds only `src/` (`rootDir: src`), so nothing test-related
+reaches `dist/`. Vitest's default glob picks up `tests/` with no extra config. When real
+API-integration tests arrive (see "What remains to be done"), give them their own `tests/integration/`
+so the fast unit suite stays network-free.
+
+### Prompts are data, not code
+
+Every string the LLM reads lives in `src/prompts/**/*.md` — never in a `.ts` file. `scripts/embed-docs.mjs`
+(run by `generate:docs`, and automatically by `compile`/`bundle`/`test`) resolves `{{include:relative/path.md}}`
+directives, strips HTML comments, and emits the git-ignored `src/prompts/index.generated.ts`. Codegen
+(rather than a runtime `readFileSync`) is what lets the same import work in both the `tsc`→`dist/` build
+and the self-contained esbuild `.mjs` bundle.
+
+Consequences worth knowing:
+- **Tuning a description is a markdown edit**, never a code change.
+- A tool's description is resolved by `registerTool` **from its name** — tool files don't carry one.
+  Adding a tool means adding it to `TOOL_NAMES` *and* creating `src/prompts/tools/<name>.md`; forgetting
+  either is a compile error in `src/prompts/descriptions.ts` (both directions are checked).
+- The RQL reference is still written **once** in `src/docs/search-syntax-prompt-v3.md` and pulled in by
+  `fragments/search-syntax.md` — edit the markdown, never re-hardcode the syntax.
+
+### Failures
+
+Tool handlers **do not catch**. They throw, and `registry.ts` turns the error into an `isError` result
+carrying the message plus the `guidance` of its class (see `src/errors.ts`). Every catch outside
+`registry.ts` exists on purpose and is commented as such — each either keeps a best-effort concern from
+surfacing or degrades gracefully rather than aborting the whole call: `sendTelemetry` (best-effort, must
+never surface), the per-operation catch in `services/jiraLinking.ts` (a batch reports partial failures
+instead of aborting), the relationships lookup in `services/schemaGrounding.ts` (a failure there still
+returns the property names), and the `/organizations` probe in `RyClient.resolveOrganizationId` (an
+unconfirmed endpoint must not sink the single-organization happy path). Input validation (`safeParse`,
+`JSON.parse`) still returns an `isError` result directly (via the shared `toolError` helper) — it is not
+an exception path.
+
+### outputSchema
+
+Declared on the six tools whose result is a small bounded record (`check_for_updates`, `list_organizations`,
+`list_applications`, `list_searchable_fields`, `list_relationships`, `link_requirements_to_jira`), which
+also return `structuredContent`. NOT declared on `search_requirements` or the two ADF tools: the spec asks
+a tool returning `structuredContent` to also serialise it into a text block for older clients, and doing
+that with a 200-requirement page or a full ADF document would send the payload twice for no gain.
 
 ## The MCP Tools
 
@@ -202,7 +263,8 @@ The MCP owns the Requirement Yogi side; the Jira side is delegated to the Atlass
 - Reliable RQL is achieved through **three complementary mechanisms**:
   1. **Reference in context** — the authoritative RQL syntax (`src/docs/search-syntax-prompt-v3.md`,
      derived from the backend ANTLR grammar + DSL eval) is embedded in the `search_requirements`
-     tool description via `searchSyntax.ts`, loaded from the file at build time (never hardcoded).
+     tool description via `src/prompts/fragments/search-syntax.md`, which includes it at build time
+     (never hardcoded).
   2. **Schema grounding** — `list_searchable_fields(space)` returns the space's REAL identifiers so
      the LLM can't invent names (its description says to call it first if unsure). It is built from
      confirmed endpoints only: relationship names from `/relationships`, and properties/variants/
@@ -287,9 +349,10 @@ Use case 3 (link to Jira):
 
 ## What remains to be done
 
-- [ ] Tests on `adfRender.ts` (pure) and on `editPage.ts` helpers (`applyReplace`/`anchoredInject`/`applyInsertAfter`, exported) covering the four operation modes, table grouping, and nested-container splicing
+- [x] Tests on `adfRender.ts` (pure) and on `editPage.ts` helpers (`applyReplace`/`anchoredInject`/`applyInsertAfter`, exported) covering table grouping and nested-container splicing
+- [ ] Tests on the `edit_page_requirements` **handler** (the four operation modes end to end); the helpers underneath are covered, the operation dispatch is not
 - [ ] `applyReplace`/`applyInsertAfter` act on a single deepest container — anchors spanning two different containers only handle the first; revisit if needed
 - [ ] Decide whether a section node should ever also be an indexed requirement (currently a parent's `key` is ignored)
-- [ ] Fine-tune tool descriptions based on LLM quality feedback
-- [ ] Use case 3: confirm the `GET /organizations` endpoint path/shape on the standalone API (assumed from the `?organizationId=` param of `/applications`), then test the whole flow against the real RY APIs
+- [ ] Fine-tune tool descriptions based on LLM quality feedback — now a pure markdown edit under `src/prompts/tools/`
+- [ ] Use case 3: confirm the `GET /organizations` endpoint path/shape on the standalone API (assumed from the `?organizationId=` param of `/applications`), then test the whole flow against the real RY APIs. The DTOs in `src/api/dto.ts` are deliberately lenient until then — tighten them (and drop the `nullish`) once the shapes are confirmed
 ```
