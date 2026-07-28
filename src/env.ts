@@ -14,6 +14,8 @@
 // never a computed process.env[name]. So every baked var must be read as a literal member
 // expression at the call site and the value passed in — hence requireDevValue takes the value.
 
+import { RyConfigError } from "./errors.js"
+
 export function isDevEnv(): boolean {
   return process.env.RY_ENV?.trim().toLowerCase() === "dev"
 }
@@ -23,7 +25,7 @@ export function isDevEnv(): boolean {
 export function requireDevValue(name: string, value: string | undefined, description: string): string {
   const trimmed = value?.trim()
   if (!trimmed) {
-    throw new Error(
+    throw new RyConfigError(
       `${name} is not set. ${description} It is baked into the dev bundle at build time — add it to .env.dev (copy .env.dev.example) and rebuild with npm run build:dev.`
     )
   }

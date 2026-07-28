@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { summarizeSearchPage, formatBulkLinkResult, SelectionSchema } from "./jiraLinks.js"
+import { summarizeSearchPage, SelectionSchema } from "../../src/tools/jiraLinks.js"
 
 describe("summarizeSearchPage", () => {
   it("trims requirements to the linking essentials and keeps the envelope", () => {
@@ -51,12 +51,21 @@ describe("summarizeSearchPage", () => {
     })
   })
 
-  it("falls back to the page length when total is missing, and omits absent feedback fields", () => {
+  it("uses the page length as the total when total is missing AND this is the last page", () => {
     const result = summarizeSearchPage({ results: [{ id: 1 }, { id: 2 }] }) as Record<string, unknown>
     expect(result.total_count).toBe(2)
     expect(result.returned).toBe(2)
     expect("humanReadable" in result).toBe(false)
     expect("messageBean" in result).toBe(false)
+  })
+
+  it("omits total_count when total is missing and more pages exist, rather than under-reporting it", () => {
+    // hasNext:true with no `total` means the page size is NOT the match count. Reporting it as the
+    // total would tell the model the query is well-scoped and stop it paginating.
+    const result = summarizeSearchPage({ results: [{ id: 1 }, { id: 2 }], hasNext: true }) as Record<string, unknown>
+    expect("total_count" in result).toBe(false)
+    expect(result.returned).toBe(2)
+    expect(result.hasNext).toBe(true)
   })
 
   it("drops undefined/null fields from each requirement summary", () => {
@@ -66,28 +75,11 @@ describe("summarizeSearchPage", () => {
     expect(result.requirements[0]).toEqual({ id: 1 })
   })
 
-  it("returns the input unchanged when it is not a search page", () => {
-    expect(summarizeSearchPage({ foo: "bar" })).toEqual({ foo: "bar" })
-    expect(summarizeSearchPage(null)).toBeNull()
-  })
-})
-
-describe("formatBulkLinkResult", () => {
-  it("formats a linked-only result", () => {
-    expect(formatBulkLinkResult({ linkedCount: 3, skippedCount: 0, unauthorizedCount: 0 })).toBe(
-      "3 link(s) created"
-    )
-  })
-
-  it("appends skipped and unauthorized counts only when positive", () => {
-    expect(formatBulkLinkResult({ linkedCount: 2, skippedCount: 1, unauthorizedCount: 4 })).toBe(
-      "2 link(s) created, 1 skipped (link already existed), 4 unauthorized (the user cannot read those Jira issues)"
-    )
-  })
-
-  it("falls back to JSON when the shape is unexpected", () => {
-    expect(formatBulkLinkResult({ weird: true })).toBe('{"weird":true}')
-    expect(formatBulkLinkResult("nope")).toBe('"nope"')
+  it("reports an empty page rather than an empty list", () => {
+    // total_count is what tells the model "the query matched nothing" as opposed to "this page is
+    // empty but there are more" — it must be present even with no results.
+    expect(summarizeSearchPage({ results: [], total: 0 })).toMatchObject({ total_count: 0, returned: 0 })
+    expect(summarizeSearchPage({})).toMatchObject({ total_count: 0, returned: 0, requirements: [] })
   })
 })
 
@@ -115,5 +107,19 @@ describe("SelectionSchema", () => {
     expect(
       SelectionSchema.safeParse({ ...base, select_all: true, query: "key ~ 'REQ-%'" }).success
     ).toBe(true)
+  })
+
+  it("rejects a non-select_all selection with a query but no explicit ids (would silently link nothing)", () => {
+    // selectAll:false ignores the query server-side, so an empty id list links zero requirements
+    // while reporting success — reject it here instead.
+    const parsed = SelectionSchema.safeParse({ ...base, query: "key ~ 'REQ-%'" })
+    expect(parsed.success).toBe(false)
+    if (!parsed.success) {
+      expect(parsed.error.issues[0].path).toEqual(["selected_requirement_ids"])
+    }
+  })
+
+  it("rejects a non-select_all selection with an empty id list", () => {
+    expect(SelectionSchema.safeParse({ ...base, selected_requirement_ids: [] }).success).toBe(false)
   })
 })

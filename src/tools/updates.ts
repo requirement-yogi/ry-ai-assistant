@@ -1,9 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { getUpdateCheck, formatUpdateSummary } from "../updateCheck.js"
-import { registerTool, TOOL_NAMES } from "./telemetry.js"
+import { UpdateCheckSchema } from "../api/githubReleases.js"
+import { registerTool, TOOL_NAMES, READS_REMOTE_STATE } from "./registry.js"
 
 // check_for_updates — the ON-DEMAND "is this MCP up to date?" check. The automatic once-per-session
-// surfacing happens elsewhere: withTelemetry (telemetry.ts) prepends an update banner to the first
+// surfacing happens elsewhere: withTelemetry (registry.ts) prepends an update banner to the first
 // tool result of the session, so the user is informed even if this tool is never called. This tool
 // stays available for an explicit "am I up to date?" question. Both share the cached check in
 // updateCheck.ts, so there is at most one GitHub round-trip per session.
@@ -12,13 +13,11 @@ export function registerUpdatesTool(server: McpServer) {
   registerTool(
     server,
     TOOL_NAMES.checkForUpdates,
-    {
-      description: `Check whether a newer version of this Requirement Yogi AI Assistant MCP server is available. You normally DON'T need to call this — the server automatically tells you on the first tool call of a session when an update is out. Use it only for an explicit "am I up to date?" question. It compares the running version against the latest GitHub release and reports the delta and what's new.`,
-      inputSchema: {},
-    },
+    { annotations: READS_REMOTE_STATE, inputSchema: {}, outputSchema: UpdateCheckSchema.shape },
     async () => {
       const check = await getUpdateCheck()
       return {
+        structuredContent: check,
         content: [
           {
             type: "text",
