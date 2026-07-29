@@ -1,8 +1,14 @@
 # RY AI assistant — MCP Server
 
-An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that lets any LLM client (Claude Desktop, Claude Code, Cursor…) place [Requirement Yogi](https://www.requirementyogi.com) macros into Confluence pages — either by building a brand-new page from a plain-language prompt, or by analyzing an existing page and reshaping it so its requirements become indexable. It can also search your requirements and link them to Jira issues.
+**Manage your [Requirement Yogi](https://www.requirementyogi.com) requirements by simply asking for it.**
 
-**Your LLM does the thinking.** This server owns the Requirement Yogi indexing rules and produces the Confluence page body deterministically. Publishing the page and finding or creating the Jira issues to link are delegated to your Atlassian MCP tools.
+This is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server. Add it to Claude Desktop, Claude Code, Cursor or any other MCP client, and you can ask that client to:
+
+- **Create or Update a requirements page** from a plain-language description or an existing page.
+- **Link requirements to Jira issues.**
+- **Build a traceability matrix** and save it as a reusable query.
+
+Your LLM does the thinking; this server knows the Requirement Yogi rules it can't — where a macro may live in a page, which columns a matrix can really carry — and applies them for you. Publishing the pages and creating the Jira issues stay with your Atlassian MCP.
 
 ---
 

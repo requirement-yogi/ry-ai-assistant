@@ -4,12 +4,13 @@
 
 An MCP (Model Context Protocol) server in TypeScript that gives an LLM client (Claude Desktop, Claude Code, Cursor…) the ability to place **Requirement Yogi macros** correctly into Confluence pages — in Atlassian Document Format (ADF).
 
-It covers three use cases:
+It covers four use cases:
 1. **Create a new Confluence page** from a structured requirements tree, with the RY macros placed in valid indexing contexts.
 2. **Edit an existing Confluence page** by injecting RY macros in place, preserving the page's original format.
 3. **Link requirements to Jira issues** through the Requirement Yogi API (finding/creating the Jira issues themselves is delegated to the Atlassian MCP).
+4. **Create traceability-matrix saved queries** — a persisted `{ RQL query + column tree }` definition — with every column validated against the data before it is written.
 
-This MCP is **not** a document-authoring tool. Its single value is owning the **Requirement Yogi indexing rules**: only it knows where a macro may live in a page and what each context indexes. The intelligence is encoded in the server (deterministic `tree → ADF` rendering), not in LLM instructions.
+This MCP is **not** a document-authoring tool. Its single value is owning the **Requirement Yogi rules** the LLM cannot know: where a macro may live in a page and what each context indexes (use cases 1–2), and which columns a traceability matrix can actually carry (use case 4). The intelligence is encoded in the server (deterministic `tree → ADF` rendering, deterministic suggestion → column translation), not in LLM instructions.
 
 **Division of work:** the client LLM does the decomposition (breaking the request into a requirements tree) and decides what to key on an existing page; the MCP produces/modifies the ADF deterministically and validates the input (Zod). No server-side LLM calls. Publishing to Confluence is delegated to another available tool (e.g. the Atlassian MCP `createConfluencePage` / `updateConfluencePage`).
 
@@ -67,7 +68,7 @@ prompts/    what the LLM reads. Markdown, no code.
 
 ```
 src/
-├── index.ts                  # MCP server (version from version.generated.ts), sets `instructions`, starts the update check, registers the 9 tools
+├── index.ts                  # MCP server (version from version.generated.ts), sets `instructions`, starts the update check, registers the 13 tools
 ├── version.generated.ts      # AUTO-GENERATED from package.json by embed-docs.mjs — the server's own version (single source: package.json)
 ├── errors.ts                 # the error taxonomy: RyConfigError / RyAmbiguityError / RyConnectionError / RyApiError / RyResponseError. Each carries the `guidance` (what to DO), written once here instead of per tool; formatToolFailure renders a failure for the LLM
 ├── log.ts                    # logDev — dev-only tracing to STDERR (STDOUT is the JSON-RPC stream). Never logs tokens or tool arguments
@@ -75,16 +76,20 @@ src/
 ├── schemas/requirements.ts   # Zod schema + TypeScript types for the requirements tree
 ├── prompts/                  # EVERYTHING the LLM reads — markdown only, no logic
 │   ├── tools/<tool name>.md  # one description per tool; the basename IS the tool name
-│   ├── fragments/*.md        # shared blocks included by the above: jira-workflow, key-rules, indexing-contexts, search-syntax
-│   ├── descriptions.ts       # typed accessor; a missing .md (or an orphan one) is a COMPILE error
+│   ├── fragments/*.md        # shared blocks included by the above: jira-workflow, traceability-workflow, key-rules, indexing-contexts, search-syntax
+│   ├── columns.md            # what each traceability column type MEANS, one `## STEP_TYPE` section each. Included in a tool description AND parsed into COLUMN_MEANINGS (the discovery `legend`) — see "The column glossary"
+│   ├── descriptions.ts       # typed accessors (toolDescription, columnMeaning); a missing .md/section — or an orphan one — is a COMPILE error, in both directions
 │   └── index.generated.ts    # AUTO-GENERATED from the .md by embed-docs.mjs (includes resolved, HTML comments stripped)
 ├── api/                      # transport only — no business logic
 │   ├── dto.ts                # Zod schemas for every RY response + parseApi/parseApiItems. Deliberately lenient (loose objects, optional/nullish fields) since the endpoints are still being confirmed; a mismatch throws a located RyResponseError instead of a silent undefined
+│   ├── traceabilityDto.ts    # the traceability-matrix contract: StepType (closed enum), Column/MatrixDefinition (what we BUILD, plain TS types), ColumnSuggestions + SavedMatrix (what we PARSE). columnSuggestions is a positional array, so it is NEVER parsed leniently — dropping an entry would shift every column index
 │   ├── ryClient.ts           # RyClient class (caches = instance fields, so tests get a clean one) + the lazily-built shared `ryClient()`. In dev traces every call to STDERR; tokens are never logged. Connection failures surface error.cause (ECONNREFUSED/…) instead of a bare "fetch failed"
 │   └── githubReleases.ts     # update check: GET the latest GitHub release + semver compare (best-effort, never throws)
 ├── services/                 # business logic, MCP-agnostic. Each takes an injectable `api` (a Pick<RyClient, …>) so it is testable without a network
 │   ├── schemaGrounding.ts    # list_searchable_fields: bounded sampling of a space to return its REAL identifiers
-│   └── jiraLinking.ts        # MCP snake_case → DTORequirementSelection, batch execution with per-operation partial failure, report rendering
+│   ├── jiraLinking.ts        # MCP snake_case → DTORequirementSelection, batch execution with per-operation partial failure, report rendering
+│   ├── matrixColumns.ts      # PURE: suggestions → candidate columns and one requested column → validated column. Owns the FROM/TO inversion, the all*-means-already-used rule and the column-tree invariants
+│   └── traceabilityMatrix.ts # the two loops: the discovery probe (one round trip, suggestions for every column) and the column-by-column validation before persisting. Also toSavedMatrixPayload (json stringified, query kept in sync) and the read-back
 └── tools/                    # MCP adapters only
     ├── toolNames.ts          # TOOL_NAMES + ToolName — single source of truth, own module so prompts/ can check against it
     ├── registry.ts           # THE choke point: registerTool wires description + telemetry + error handling + dev trace + update banner from the tool name alone. Also the shared `annotations` presets
@@ -92,6 +97,7 @@ src/
     ├── buildAdf.ts           # build_requirements_adf — tool wrapper (use case 1)
     ├── editPage.ts           # edit_page_requirements — analyze + reshape an existing page (use case 2)
     ├── jiraLinks.ts          # the 6 use-case-3 tools (organizations, applications, searchable-fields, search, relationships, links)
+    ├── traceability.ts       # the 4 use-case-4 tools (discover columns, save matrix, get matrix, list matrices)
     ├── adfRender.ts          # shared deterministic renderers: tree→ADF, table, paragraph (the RY intelligence)
     └── macro.ts              # buildInlineExtension — shared RY macro node, single source of truth
 docs/
@@ -135,18 +141,22 @@ carrying the message plus the `guidance` of its class (see `src/errors.ts`). Eve
 surfacing or degrades gracefully rather than aborting the whole call: `sendTelemetry` (best-effort, must
 never surface), the per-operation catch in `services/jiraLinking.ts` (a batch reports partial failures
 instead of aborting), the relationships lookup in `services/schemaGrounding.ts` (a failure there still
-returns the property names), and the `/organizations` probe in `RyClient.resolveOrganizationId` (an
-unconfirmed endpoint must not sink the single-organization happy path). Input validation (`safeParse`,
+returns the property names), the `/organizations` probe in `RyClient.resolveOrganizationId` (an
+unconfirmed endpoint must not sink the single-organization happy path), and `preservedFields` in
+`services/traceabilityMatrix.ts` (a stored definition that won't parse must not block the update that
+would repair it — it only costs the definition-level fallbacks). Input validation (`safeParse`,
 `JSON.parse`) still returns an `isError` result directly (via the shared `toolError` helper) — it is not
 an exception path.
 
 ### outputSchema
 
-Declared on the six tools whose result is a small bounded record (`check_for_updates`, `list_organizations`,
-`list_applications`, `list_searchable_fields`, `list_relationships`, `link_requirements_to_jira`), which
-also return `structuredContent`. NOT declared on `search_requirements` or the two ADF tools: the spec asks
-a tool returning `structuredContent` to also serialise it into a text block for older clients, and doing
-that with a 200-requirement page or a full ADF document would send the payload twice for no gain.
+Declared on the nine tools whose result is a small bounded record (`check_for_updates`, `list_organizations`,
+`list_applications`, `list_searchable_fields`, `list_relationships`, `link_requirements_to_jira`,
+`save_traceability_matrix`, `get_traceability_matrix`, `list_traceability_matrices`), which also return
+`structuredContent`. NOT declared on `search_requirements`, `discover_matrix_columns` or the two ADF tools:
+the spec asks a tool returning `structuredContent` to also serialise it into a text block for older clients,
+and doing that with a 200-requirement page, a whole space's column vocabulary or a full ADF document would
+send the payload twice for no gain.
 
 ## The MCP Tools
 
@@ -161,6 +171,10 @@ that with a 200-requirement page or a full ADF document would send the payload t
 | `search_requirements` | `query` (RQL), `space_key?`, `offset?`, `base_url?` | `{ total_count, returned, requirements[] }` (IDs + container/variant) | Use case 3 — discover the RY requirements; relays RQL parse errors verbatim for self-correction |
 | `list_relationships` | `application_id?` | relationships JSON (with IDs) | Use case 3 — discover the available relationship types |
 | `link_requirements_to_jira` | `links[]` (selection, jira_application_id, issue_ids, relationship_id), `base_url?` | creation report | Use case 3 — create the links via the RY jira-bulk service |
+| `discover_matrix_columns` | `space`, `query` (RQL), `columns[]?`, `variants?`, `variable_values?`, `base_url?` | per column: the candidate child columns + notes | Use case 4 — THE discovery loop: one round trip per level of depth, because the column vocabulary is derived from the data |
+| `save_traceability_matrix` | `space`, `name`, `query`, `columns[]`, `description?`, `variants?`, `limit?`, `shared_level?`, `matrix_id?` | save report (validated columns, warnings, or the problems and nothing written) | Use case 4 — validates every column against live suggestions, THEN persists the saved query (or refuses) |
+| `get_traceability_matrix` | `matrix_id`, `base_url?` | the saved matrix + its definition parsed out of `json` | Use case 4 — read back |
+| `list_traceability_matrices` | `space?`, `name?`, `owned?`, `traceability_only?`, `offset?`, `limit?` | paginated summaries | Use case 4 — find an existing saved matrix (and its id) |
 
 The two ADF tools produce ADF, ready to be published with `contentFormat: "adf"`. Both share the renderers in `adfRender.ts` so RY formatting is identical whether a page is created or edited. **ADF is the single source of truth** — there is no Markdown intermediate and no refine loop (a Markdown roundtrip would destroy an existing page's formatting).
 
@@ -299,6 +313,188 @@ The MCP owns the Requirement Yogi side; the Jira side is delegated to the Atlass
   failures per operation. The response is a `DTOJiraBulkLinkResult`
   (`linkedCount`/`skippedCount`/`unauthorizedCount`), rendered as a per-operation summary.
 
+## Traceability matrices (use case 4)
+
+A traceability matrix saved query is `{ RQL query + a TREE of columns }`, persisted so it can be
+re-run and rendered later. The API used is the **Confluence app API** (`/rest/traceability/…`,
+`/rest/saved-matrices`), not the public REST API: the public one exposes neither saved matrices nor
+the suggestion mechanism, so it cannot save a query at all.
+
+The hard part is **not** the HTTP call, it is producing columns that are *relevant*.
+
+### There is no "list available columns" endpoint
+
+The column vocabulary is **data-dependent** and there is no global list of it anywhere. The backend
+computes suggestions from the requirements actually present in a column's cells (relationships really
+declared, properties really observed, link counters). The only way to see them:
+
+`POST /rest/traceability/{spaceKey}` (needs READ on the space) answers, beside the cells, with
+**`columnSuggestions`** — an array **indexed by column**, where entry `i` describes what may be added
+as a **child of column `i`**. Request body:
+`{ traceabilityMatrix: <definition>, pagination: { searchOffset, limit, columnsPagination }, variableValues }`.
+
+**`pagination.columnsPagination` must hold one entry per column index** — the backend does
+`columnsPagination.get(column.columnIndex).getLastCellId()` for every column, so `[]` (or anything
+shorter than the column count) is an `IndexOutOfBoundsException` server-side. It surfaces as a bare
+500 (`"An unexpected error has occurred"`, empty `errors`) that says nothing about the payload, which
+is why `columnsPagination()` in `ryClient.ts` derives it from the definition rather than taking it
+from a caller. Its entries are `{ lastCellId: null }`: no cursor to resume a column from yet.
+Likewise `variants` is written as `[]`, never `null` — both mean "the current variant", and there is
+no reason to hand a backend a null collection to iterate.
+
+So discovery is inherently **iterative, one round trip per level of depth**: the suggestions for
+level N+1 cannot exist before level N does. `discover_matrix_columns` is that single round trip
+(column 0 + the columns already chosen → the candidates for every one of them), and the **LLM walks
+the loop** by calling it again with the columns it kept. `services/traceabilityMatrix.ts` owns the
+probe; `services/matrixColumns.ts` owns the suggestion → column translation.
+
+### The three traps, all handled in code and covered by tests
+
+1. **The FROM/TO inversion.** `dependencySuggestions.FROM` → a step of type **`TO`**, and
+   `dependencySuggestions.TO` → a step of type **`FROM`**. The naive same-name mapping is wrong and
+   yields a column that matches nothing. See `SUGGESTION_SIDE_TO_STEP_TYPE`.
+2. **`allDependencies` / `allProperties` / `allExternalProperties` are not capability flags.** Their
+   value is `!alreadyUsed`: `false` means such a child column already exists there, **never** that
+   the data doesn't support it. So a `false` is reported as "already attached" (a duplicate to
+   remove), never as an absence of support — in the candidate notes *and* in the rejection message.
+3. **`limit` conditions what you discover.** Suggestions derive from the requirements of the current
+   page, so every probe uses the full page (`DISCOVERY_LIMIT = 200`) regardless of the `limit` the
+   saved definition will carry.
+
+### Validation is on us
+
+The backend validates **exactly one thing** about a matrix definition: that `columns` is non-empty.
+A column naming a relationship or property that doesn't exist is persisted without error and only
+shows up later as an empty matrix. `save_traceability_matrix` therefore re-validates **every** column
+against live suggestions before writing anything, and writes **nothing** if one fails.
+
+That walk is **incremental on purpose**: column N is checked against the suggestions of the matrix
+that stops *before* it — the state in which the flags mean what they say (probing with the finished
+matrix would report the very aggregate columns being validated as unavailable, per trap 2). It costs
+one round trip per column (capped by `MAX_COLUMNS`), and it stops at the **first** rejection, since
+the later columns' `parentColumnIndex` refer to positions in the list.
+
+Where the API can't confirm a value, the column is **kept with a warning** rather than rejected: a
+Jira field absent from a truncated list (`hasMoreJiraFields`), a `JIRA_RELATIONSHIP` name (gated by
+`hasJiraLinks` but never enumerated), a Zephyr Scale / Xray object type (the element shape of those
+lists is not part of the documented contract). Rejecting there would be a false negative.
+
+### Why the step-type enum is hard-coded (and what keeps it honest)
+
+`STEP_TYPES` is a closed 23-value enum, which looks like it defeats the point of having a discovery
+tool. It does not, and the reason is worth knowing before anyone "fixes" it:
+
+- **The enum is not the coupling.** A suggestion field only becomes a candidate column because
+  `candidatesFor` maps it (`propertySuggestions` → `PROPERTY`, `dependencySuggestions.FROM` → `TO`…).
+  Opening the enum to `z.string()` would not make a new backend column type appear in discovery — only
+  a new mapping does. Nothing would be gained, and the validation would be lost.
+- **The enum IS the validated set.** The whole value of this feature is refusing a column the data
+  does not support, which requires knowing what a type means and which suggestion field gates it. A
+  type nobody has taught the MCP about cannot be checked, so accepting it would mean writing exactly
+  the silently-empty matrices this feature exists to prevent.
+- **Reading is already lenient**: `StoredMatrixDefinitionSchema` types `step.type` as a plain string,
+  so a matrix written by a newer RY version (or by hand in the UI) is read back fine. Only the WRITE
+  path is closed.
+
+Two mechanisms keep the hard-coded vocabulary from rotting:
+
+1. **The backend telling us is detected, not missed.** `unmappedSuggestionFields` compares the
+   suggestion object against the keys of `ColumnSuggestionsSchema` (a LOOSE object, so unknown fields
+   survive) and `discoverMatrixColumns` reports them once per response, pointing at
+   `check_for_updates`. A new RY column type therefore surfaces as a visible note instead of being
+   silently absent forever. Zero maintenance: declaring the field in the DTO stops the report.
+2. **Adding a type is compiler-guided.** Appending one value to `STEP_TYPES` produces exactly three
+   errors, which are the three things it needs: a `DEFAULT_LABELS` entry, a `## <TYPE>` section in
+   `src/prompts/matrix_columns.md` (via `descriptions.ts`), and a `resolveColumn` case — the `default` branch
+   assigns `request.type` to `keyof typeof FLAG_GATED_STEPS`, so a new type cannot silently fall
+   through into "treated as a boolean flag". What stays manual is the suggestion field and its mapping,
+   which is irreducible: only a human knows that `fooSuggestions[].foo` is the value of type `FOO`.
+
+### The column glossary (what makes the types usable at all)
+
+A step type is an enum name, and a model cannot act on `ORIGINAL_LINKS`. Observed failure: asked to
+"add the pages where the requirements are written", the LLM answered that it could not — while
+`ORIGINAL_LINKS` was sitting in the suggestions.
+
+The meanings therefore live in **`src/prompts/matrix_columns.md`**, one `## STEP_TYPE` section per type,
+written ONCE and used twice:
+
+- **included** in the `discover_matrix_columns` description, so the model knows what exists *before*
+  it calls anything (a model that believes a column type doesn't exist never calls discovery to find
+  out);
+- **parsed** by `embed-docs.mjs` into `COLUMN_MEANINGS`, so every discovery response carries a
+  `legend` for the types it actually returned — built per response, not per candidate, or a space
+  with 40 properties would repeat one sentence 40 times. "Returned" includes the types a response only
+  NAMES in a `note` (`CandidateSet.mentioned`: `JIRA_RELATIONSHIP`, `ZEPHYR_SCALE`, `XRAY`,
+  `CALCULATION` are never candidates because their values aren't enumerated) — announcing a possible
+  column without explaining it is the same give-up bug as not announcing it at all.
+
+The file opens with a natural-language → column-type mapping ("the document where the requirement is
+written" → `ORIGINAL_LINKS`…), which is the part that fixes the give-up behaviour.
+
+**Adding or rewording a meaning is a markdown edit, nothing else.** Completeness is checked in both
+directions at COMPILE time in `src/prompts/descriptions.ts` (same mechanism as the tool
+descriptions), so the glossary cannot fall behind `StepType`.
+
+### Structural invariants of a definition
+
+- Column 0 is always `{ step: { type: "FIRST_COLUMN", value: null }, columnIndex: 0,
+  parentColumnIndex: 0 }` — it holds the requirements the query returned, and it is **its own
+  parent**. This MCP injects it; the LLM never passes it (`FIRST_COLUMN` is excluded from the input
+  enum).
+- `columns` is a **tree**: column N hangs under an existing column of index < N via
+  `parentColumnIndex`.
+- `columnIndex` is the real index in the array — no holes. Both are checked by `structuralProblems`
+  (no round trip) and again by `resolveColumn`.
+
+### Persistence
+
+`POST /rest/saved-matrices` (or `PUT /rest/saved-matrices/{id}`) with a `DTOSavedMatrix`
+(`name` ≤ 255, `spaceKey`, `type: "TRACEABILITY"`, `sharedLevel`, `status`, `container`). Two
+subtleties, both owned by `toSavedMatrixPayload` and nowhere else:
+
+- **`json` is a String**, not a nested object: it holds `JSON.stringify({ columns, query, variants,
+  limit, spaceKey })`.
+- A step that carries no value gets **`value: ""`, never `null`** (`NO_STEP_VALUE`). The backend
+  tolerates both, but `""` is what Requirement Yogi itself writes. The reference is a real stored
+  definition, pinned as a golden test in `tests/services/traceabilityMatrix.test.ts`
+  (`REAL_STORED_DEFINITION`) — the shape this MCP must reproduce field for field. Update that
+  fixture, not the code's expectations, if a newer product version writes something different.
+- **`query` is duplicated** — once at the root (what the saved-matrix list filters on) and once
+  inside `json` (what actually runs). Both are read from the same definition so they cannot drift;
+  reading a matrix back **warns** when a stored pair has drifted.
+
+**Every** write (create and update alike) carries `ownerAccountId: "FILLED_IN_BACKEND"`
+(`BACKEND_FILLED_ACCOUNT`) — the backend resolves the owning account itself, and a client must never
+send a real account id (that would be reassigning ownership). `RyClient.savedMatrixBody` injects it for
+both paths, alongside the `id` an update repeats in its body. It is deliberately NOT a field of
+`SavedMatrixPayload`: going through the transport is the only way it can reach the wire, so no caller
+can omit it or substitute an account id.
+
+`status` (`ACTIVE` | `DELETED` | `ARCHIVED`, `MATRIX_STATUSES`) is part of what the REQUEST asks for,
+so it lives in `toSavedMatrixPayload` — defaulted to `ACTIVE` and sent on create and update alike —
+rather than being hardcoded in the client next to the owner sentinel. `DELETED` is a soft delete; the
+tool description tells the LLM to pass either non-default value only when the user asked for it.
+
+**An update is a full PUT, so it reads before it writes.** `PUT /rest/saved-matrices/{id}` replaces the
+whole matrix: every field the LLM does not restate would be rewritten with the defaults above, and "add
+a Priority column to matrix 42" would un-share it, drop its description, reset a custom `limit`, drop
+its variant filter and bring an `ARCHIVED` matrix back to life. So a `matrixId` makes
+`saveTraceabilityMatrix` `GET` the stored matrix FIRST (`preservedFields`) and use its own values as the
+fallbacks for `description` / `sharedLevel` / `status` / `limit` / `variants`; only what the caller
+states changes, and whatever was carried over is reported in the `warnings`. That read is deliberately
+uncaught — if the matrix can't be read, nothing can be preserved, and failing beats silently resetting
+someone's saved query. The preserved `variants` also feed the validation probes, or a column would be
+checked against data the saved matrix will not show. `columns` and `query` are NOT preserved: they are
+the point of the update, and the tool description says an update replaces the column tree rather than
+adding to it.
+
+Reading back: `GET /rest/saved-matrices/{id}` → `JSON.parse(response.json)` (lenient schema, so a
+matrix authored by a newer version or in the UI still parses; an unusable `json` is a
+`RyResponseError`). `POST /rest/saved-matrices/search?offset=&limit=` with `RYEntityFilters`
+(`owned` is required) → one paginated page. `DELETE /rest/saved-matrices/{id}` → 204 (on the client
+only — no MCP tool deletes a user's saved query).
+
 ### Configuration (MCP server environment)
 
 | Env var | Value |
@@ -320,7 +516,8 @@ Build-time (baked by `scripts/build-bundle.mjs`, **not** in the MCP config):
 | `RY_DEV_STANDALONE_URL` | **dev only, from `.env.dev`** — this developer's standalone API base URL. Optional; defaults to `http://localhost:8082/api`. |
 
 Hosts per residency (in `src/api/ryClient.ts`): old Confluence REST API
-`https://confluence[.us].requirementyogi.com` (search + jira-bulk links), new standalone API
+`https://confluence[.us].requirementyogi.com` (search + jira-bulk links + traceability/saved
+matrices), new standalone API
 `https://api[.us].requirementyogi.com/api` (applications + relationships).
 
 **Auth differs per API**: the standalone API takes `Authorization: Bearer <token>`; the Confluence
@@ -345,6 +542,13 @@ Use case 3 (link to Jira):
   → search_requirements (RY IDs)
   → find/create the Jira issues via Atlassian MCP (user chooses the structure first)
   → list_relationships (user picks the relationship) → link_requirements_to_jira
+
+Use case 4 (traceability matrix saved query):
+  [User] asks for a matrix → LLM writes the RQL query for the ROOT requirements
+  → discover_matrix_columns (no columns) → LLM picks columns
+  → discover_matrix_columns (with them) → … one call per level of depth
+  → user confirms the plan → save_traceability_matrix (validates every column, then persists)
+  → get_traceability_matrix / list_traceability_matrices to read back
 ```
 
 ## What remains to be done
@@ -354,5 +558,7 @@ Use case 3 (link to Jira):
 - [ ] `applyReplace`/`applyInsertAfter` act on a single deepest container — anchors spanning two different containers only handle the first; revisit if needed
 - [ ] Decide whether a section node should ever also be an indexed requirement (currently a parent's `key` is ignored)
 - [ ] Fine-tune tool descriptions based on LLM quality feedback — now a pure markdown edit under `src/prompts/tools/`
+- [ ] Use case 4: confirm the element shape of `zephyrScaleFields` / `xrayFields` and the response shape of `POST /rest/saved-matrices/search` against the real API — the first is only loosely matched (a miss warns instead of rejecting) and the second goes through the lenient `extractItems` envelope
+- [ ] Use case 4: no MCP tool deletes a saved matrix; `RyClient.deleteSavedMatrix` exists if one is ever wanted
 - [ ] Use case 3: confirm the `GET /organizations` endpoint path/shape on the standalone API (assumed from the `?organizationId=` param of `/applications`), then test the whole flow against the real RY APIs. The DTOs in `src/api/dto.ts` are deliberately lenient until then — tighten them (and drop the `nullish`) once the shapes are confirmed
 ```

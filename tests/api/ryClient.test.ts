@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest"
-import { extractItems, pageTotal, resetRyClient, ryClient, RyClient } from "../../src/api/ryClient.js"
+import { columnsPagination, extractItems, pageTotal, resetRyClient, ryClient, RyClient } from "../../src/api/ryClient.js"
 import { RyAmbiguityError, RyApiError, RyConfigError, RyConnectionError, RyResponseError } from "../../src/errors.js"
+import { BACKEND_FILLED_ACCOUNT, type MatrixDefinition } from "../../src/api/traceabilityDto.js"
 
 describe("extractItems", () => {
   it("returns a bare array as-is", () => {
@@ -49,10 +50,15 @@ describe("pageTotal", () => {
 type Reply = { status?: number; body?: unknown; text?: string } | Error
 
 function stubFetch(replies: Reply[]) {
-  const calls: { url: string; headers: Record<string, string>; method: string }[] = []
+  const calls: { url: string; headers: Record<string, string>; method: string; body?: unknown }[] = []
   let call = 0
   const fetchStub = async (url: string, init: RequestInit = {}) => {
-    calls.push({ url, headers: init.headers as Record<string, string>, method: init.method ?? "GET" })
+    calls.push({
+      url,
+      headers: init.headers as Record<string, string>,
+      method: init.method ?? "GET",
+      body: typeof init.body === "string" ? JSON.parse(init.body) : undefined,
+    })
     const reply = replies[call++] ?? { body: [] }
     if (reply instanceof Error) throw reply
     const status = reply.status ?? 200
@@ -229,6 +235,205 @@ describe("RyClient transport", () => {
     const baseUrls = calls.filter((c) => c.url.includes("/rest/search")).map((c) => c.headers["X-Base-Url"])
     expect(baseUrls).toEqual(["https://first.atlassian.net", "https://second.atlassian.net"])
     expect(calls.filter((c) => c.url.includes("/applications"))).toHaveLength(2)
+  })
+})
+
+// The traceability endpoints live on the Confluence API, and two of them have a payload shape that
+// is easy to get subtly wrong (the generation envelope, and `json` being a string).
+
+const definition = (overrides: Partial<MatrixDefinition> = {}): MatrixDefinition => ({
+  columns: [
+    { label: "Requirement", step: { type: "FIRST_COLUMN", value: "" }, columnIndex: 0, parentColumnIndex: 0, hidden: false },
+  ],
+  query: "key ~ 'FN-%'",
+  variants: [],
+  limit: 200,
+  spaceKey: "DEMO",
+  ...overrides,
+})
+
+// The backend reads columnsPagination.get(column.columnIndex).lastCellId for every column, so a
+// short array is an IndexOutOfBoundsException on the server — surfacing as a bare 500 that says
+// nothing about the payload. Getting the SIZE right is the whole contract of this helper.
+describe("columnsPagination", () => {
+  const columns = (...indexes: number[]): MatrixDefinition =>
+    definition({
+      columns: indexes.map((columnIndex) => ({
+        label: `c${columnIndex}`,
+        step: { type: "PROPERTY" as const, value: "P" },
+        columnIndex,
+        parentColumnIndex: 0,
+        hidden: false,
+      })),
+    })
+
+  it("carries exactly one cursor per column", () => {
+    expect(columnsPagination(columns(0))).toEqual([{ lastCellId: null }])
+    expect(columnsPagination(columns(0, 1, 2))).toHaveLength(3)
+  })
+
+  it("is never shorter than the highest column index, whatever the column order", () => {
+    // Sized off the indexes rather than the array length: get(columnIndex) is what the server calls,
+    // so an out-of-order (or sparse) definition still has to be addressable at its highest index.
+    expect(columnsPagination(columns(2, 0, 1))).toHaveLength(3)
+    expect(columnsPagination(columns(0, 3))).toHaveLength(4)
+  })
+
+  it("is empty only for a matrix with no columns at all", () => {
+    expect(columnsPagination(definition({ columns: [] }))).toEqual([])
+  })
+})
+
+describe("RyClient traceability endpoints", () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it("sends one pagination cursor per column, so the server can index into it", async () => {
+    const calls = stubFetch([{ body: { columnSuggestions: [] } }])
+    await client().generateTraceabilityMatrix({
+      matrix: definition({
+        columns: [
+          { label: "Requirement", step: { type: "FIRST_COLUMN", value: "" }, columnIndex: 0, parentColumnIndex: 0, hidden: false },
+          { label: "Category", step: { type: "PROPERTY", value: "Category" }, columnIndex: 1, parentColumnIndex: 0, hidden: false },
+        ],
+      }),
+      instanceBaseUrl: "https://acme.atlassian.net",
+    })
+    const { pagination } = calls[0].body as { pagination: { columnsPagination: unknown[] } }
+    expect(pagination.columnsPagination).toEqual([{ lastCellId: null }, { lastCellId: null }])
+  })
+
+  it("posts the generation envelope the API expects, at the space's own path", async () => {
+    const calls = stubFetch([{ body: { columnSuggestions: [{ description: true }] } }])
+    const result = await client().generateTraceabilityMatrix({
+      matrix: definition({ spaceKey: "MY SPACE" }),
+      variableValues: { release: "1.2" },
+      instanceBaseUrl: "https://acme.atlassian.net",
+    })
+
+    expect(calls[0].method).toBe("POST")
+    expect(calls[0].url).toBe("https://conf.test/rest/traceability/MY%20SPACE")
+    expect(calls[0].headers["X-Api-Key"]).toBe("tok")
+    expect(calls[0].body).toEqual({
+      traceabilityMatrix: definition({ spaceKey: "MY SPACE" }),
+      // The suggestions are derived from the requirements this page returns, so the page size is
+      // driven by the definition's own limit rather than a second, independent knob. columnsPagination
+      // carries one cursor per column — see the columnsPagination tests.
+      pagination: { searchOffset: 0, limit: 200, columnsPagination: [{ lastCellId: null }] },
+      variableValues: { release: "1.2" },
+    })
+    expect(result.columnSuggestions).toEqual([{ description: true }])
+  })
+
+  it("sends an empty variableValues rather than omitting it", async () => {
+    const calls = stubFetch([{ body: { columnSuggestions: [] } }])
+    await client().generateTraceabilityMatrix({ matrix: definition(), instanceBaseUrl: "https://acme.atlassian.net" })
+    expect((calls[0].body as { variableValues: unknown }).variableValues).toEqual({})
+  })
+
+  it("keeps the suggestion array positional instead of dropping odd entries", async () => {
+    // columnSuggestions is indexed BY COLUMN: dropping a malformed entry the way the item-level
+    // leniency does elsewhere would shift every later index onto the wrong parent column.
+    stubFetch([{ body: { columnSuggestions: [{ description: true }, {}, { links: true }] } }])
+    const result = await client().generateTraceabilityMatrix({
+      matrix: definition(),
+      instanceBaseUrl: "https://acme.atlassian.net",
+    })
+    expect(result.columnSuggestions).toHaveLength(3)
+    expect(result.columnSuggestions?.[2]).toEqual({ links: true })
+  })
+
+  it("creates a saved matrix with the definition serialised as a string", async () => {
+    const calls = stubFetch([{ body: { id: 42 } }])
+    const saved = await client().createSavedMatrix(
+      {
+        name: "Matrix",
+        spaceKey: "DEMO",
+        type: "TRACEABILITY",
+        json: JSON.stringify(definition()),
+        query: "key ~ 'FN-%'",
+        sharedLevel: "NONE",
+        status: "ACTIVE",
+      },
+      "https://acme.atlassian.net"
+    )
+
+    expect(calls[0].method).toBe("POST")
+    expect(calls[0].url).toBe("https://conf.test/rest/saved-matrices")
+    const body = calls[0].body as { json: unknown; query: string }
+    expect(typeof body.json).toBe("string")
+    expect(JSON.parse(body.json as string).query).toBe(body.query)
+    expect(saved.id).toBe(42)
+  })
+
+  it("treats an empty-body write as a success with no id", async () => {
+    stubFetch([{ status: 204 }])
+    const saved = await client().createSavedMatrix(
+      { name: "M", spaceKey: "DEMO", type: "TRACEABILITY", json: "{}", query: "q", sharedLevel: "NONE", status: "ACTIVE" },
+      "https://acme.atlassian.net"
+    )
+    expect(saved).toEqual({})
+  })
+
+  it("puts the id in both the path and the body when updating", async () => {
+    const calls = stubFetch([{ body: { id: 7 } }])
+    await client().updateSavedMatrix(
+      7,
+      { name: "M", spaceKey: "DEMO", type: "TRACEABILITY", json: "{}", query: "q", sharedLevel: "NONE", status: "ACTIVE" },
+      "https://acme.atlassian.net"
+    )
+    expect(calls[0].method).toBe("PUT")
+    expect(calls[0].url).toBe("https://conf.test/rest/saved-matrices/7")
+    expect((calls[0].body as { id: number }).id).toBe(7)
+  })
+
+  it("tells the backend to fill the owner in itself on EVERY write", async () => {
+    // Both writes carry the sentinel; a client must never send a real account id, which would amount
+    // to reassigning ownership. Injected by the transport, so no caller can omit it or replace it —
+    // which is also why `ownerAccountId` is not a field of SavedMatrixPayload.
+    const payload = {
+      name: "M",
+      spaceKey: "DEMO",
+      type: "TRACEABILITY",
+      json: "{}",
+      query: "q",
+      sharedLevel: "NONE",
+      status: "ACTIVE",
+    } as const
+
+    expect(BACKEND_FILLED_ACCOUNT).toBe("FILLED_IN_BACKEND")
+
+    const created = stubFetch([{ body: { id: 42 } }])
+    await client().createSavedMatrix(payload, "https://acme.atlassian.net")
+    expect((created[0].body as { ownerAccountId: string }).ownerAccountId).toBe(BACKEND_FILLED_ACCOUNT)
+    // A create carries no id — that one is only in the body of an update.
+    expect(created[0].body).not.toHaveProperty("id")
+    vi.unstubAllGlobals()
+
+    const updated = stubFetch([{ body: { id: 7 } }])
+    await client().updateSavedMatrix(7, payload, "https://acme.atlassian.net")
+    expect((updated[0].body as { ownerAccountId: string }).ownerAccountId).toBe(BACKEND_FILLED_ACCOUNT)
+    expect((updated[0].body as { id: number }).id).toBe(7)
+  })
+
+  it("searches saved matrices with the filters in the body and the paging in the query", async () => {
+    const calls = stubFetch([{ body: { results: [{ id: 1 }, { id: 2 }], total: 9 } }])
+    const page = await client().searchSavedMatrices({
+      filters: { owned: true, spaceKey: "DEMO" },
+      offset: 50,
+      limit: 25,
+      instanceBaseUrl: "https://acme.atlassian.net",
+    })
+    expect(calls[0].method).toBe("POST")
+    expect(calls[0].url).toContain("/rest/saved-matrices/search?offset=50&limit=25")
+    expect(calls[0].body).toEqual({ owned: true, spaceKey: "DEMO" })
+    expect(page).toEqual({ items: [{ id: 1 }, { id: 2 }], total: 9 })
+  })
+
+  it("deletes by id and accepts the 204", async () => {
+    const calls = stubFetch([{ status: 204 }])
+    await expect(client().deleteSavedMatrix(5, "https://acme.atlassian.net")).resolves.toBeUndefined()
+    expect(calls[0].method).toBe("DELETE")
+    expect(calls[0].url).toBe("https://conf.test/rest/saved-matrices/5")
   })
 })
 

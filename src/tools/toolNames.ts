@@ -19,6 +19,10 @@ export const TOOL_NAMES = {
   searchRequirements: "search_requirements",
   listRelationships: "list_relationships",
   linkRequirementsToJira: "link_requirements_to_jira",
+  discoverMatrixColumns: "discover_matrix_columns",
+  saveTraceabilityMatrix: "save_traceability_matrix",
+  getTraceabilityMatrix: "get_traceability_matrix",
+  listTraceabilityMatrices: "list_traceability_matrices",
 } as const
 
 export type ToolName = (typeof TOOL_NAMES)[keyof typeof TOOL_NAMES]
