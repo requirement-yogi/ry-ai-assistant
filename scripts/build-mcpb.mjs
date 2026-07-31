@@ -1,13 +1,13 @@
 // Build-time packaging: assemble the .mcpb one-click bundle for Claude Desktop.
 //
 // A .mcpb is just a zip of `manifest.json` + the server code. Because the server is already
-// an esbuild single-file bundle (standalone/ry-ai-assistant.mjs, no runtime deps), the bundle
+// an esbuild single-file bundle (release/ry-ai-assistant.mjs, no runtime deps), the bundle
 // only needs that one file — no node_modules to embed.
 //
 // Steps: stage manifest.json (version synced from package.json) + the prod .mjs into
-// build/mcpb/, then run `mcpb pack` to produce standalone/ry-ai-assistant.mcpb.
+// build/mcpb/, then run `mcpb pack` to produce release/ry-ai-assistant.mcpb.
 //
-// Prereq: run `npm run build:prod` first so standalone/ry-ai-assistant.mjs exists.
+// Prereq: run `npm run build:prod` first so release/ry-ai-assistant.mjs exists.
 
 import { execFileSync } from "node:child_process"
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
@@ -15,10 +15,10 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..")
-const bundlePath = join(root, "standalone", "ry-ai-assistant.mjs")
+const bundlePath = join(root, "release", "ry-ai-assistant.mjs")
 const manifestSrc = join(root, "mcpb", "manifest.json")
 const stageDir = join(root, "build", "mcpb")
-const outFile = join(root, "standalone", "ry-ai-assistant.mcpb")
+const outFile = join(root, "release", "ry-ai-assistant.mcpb")
 
 if (!existsSync(bundlePath)) {
   console.error(

@@ -24,9 +24,9 @@ This MCP is **not** a document-authoring tool. Its single value is owning the **
 ## Commands
 
 ```bash
-npm run build        # full build: tsc → dist/ + both esbuild bundles into standalone/
-npm run build:prod   # prod bundle only → standalone/ry-ai-assistant.mjs
-npm run build:dev    # dev bundle only  → standalone/ry-ai-assistant-dev.mjs (dev mode baked in)
+npm run build        # full build: tsc → dist/ + both esbuild bundles into release/
+npm run build:prod   # prod bundle only → release/ry-ai-assistant.mjs
+npm run build:dev    # dev bundle only  → release/ry-ai-assistant-dev.mjs (dev mode baked in)
 npm run compile      # tsc only → dist/ (also what `prepare`/`npm install` runs)
 npm start            # run the compiled dist build (node dist/index.js)
 npm test             # vitest (runs generate:docs first — the prompt/version modules are codegen)
@@ -104,7 +104,7 @@ docs/
     └── search-syntax-prompt-v3.md   # AUTHORITATIVE RQL syntax (from the backend ANTLR grammar + DSL eval); single source of truth
 scripts/
     ├── embed-docs.mjs        # build-time codegen: src/prompts/**/*.md → src/prompts/index.generated.ts (imported by both tsc and esbuild builds)
-    └── build-bundle.mjs      # esbuild bundler: bakes env-specific values via `define` (RY_ENV + dev's .env.dev) → standalone/*.mjs
+    └── build-bundle.mjs      # esbuild bundler: bakes env-specific values via `define` (RY_ENV + dev's .env.dev) → release/*.mjs
 tests/                        # unit tests, MIRRORING the src/ tree (tests/api/dto.test.ts ↔ src/api/dto.ts)
 ```
 
