@@ -28,5 +28,6 @@ Thumbs.db
 .idea/
 *.swp
 
-# Standalone single-file bundle (built on demand)
-standalone/
+# Distributable artifacts: the single-file .mjs bundles + the .mcpb (built on demand, attached to
+# a GitHub release rather than committed)
+release/

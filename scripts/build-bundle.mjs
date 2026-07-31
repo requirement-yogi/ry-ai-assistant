@@ -2,8 +2,12 @@
 // time (esbuild `define`), so the runtime MCP config is identical for dev and prod — the only
 // difference is which .mjs you point at.
 //
-//   node scripts/build-bundle.mjs prod   → standalone/ry-ai-assistant.mjs     (fixed values baked)
-//   node scripts/build-bundle.mjs dev    → standalone/ry-ai-assistant-dev.mjs (this dev's .env.dev)
+//   node scripts/build-bundle.mjs prod   → release/ry-ai-assistant.mjs     (fixed values baked)
+//   node scripts/build-bundle.mjs dev    → release/ry-ai-assistant-dev.mjs (this dev's .env.dev)
+//
+// Only the prod bundle is a release asset. The dev one shares the directory for convenience but is
+// per-developer by construction (it bakes THIS developer's Forge env id and tunnel URL), so it must
+// never be attached to a release or handed to a teammate — theirs would talk to your instance.
 //
 // Prod bakes only RY_ENV=prod; the fixed prod values live as constants in the source. Dev bakes
 // RY_ENV=dev plus this developer's unique values, loaded from .env.dev (git-ignored; copy
@@ -81,7 +85,7 @@ await build({
   target: "node18",
   format: "esm",
   define,
-  outfile: resolve(root, target === "dev" ? "standalone/ry-ai-assistant-dev.mjs" : "standalone/ry-ai-assistant.mjs"),
+  outfile: resolve(root, target === "dev" ? "release/ry-ai-assistant-dev.mjs" : "release/ry-ai-assistant.mjs"),
 })
 
-console.log(`Built ${target} bundle → standalone/ry-ai-assistant${target === "dev" ? "-dev" : ""}.mjs`)
+console.log(`Built ${target} bundle → release/ry-ai-assistant${target === "dev" ? "-dev" : ""}.mjs`)
