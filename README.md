@@ -40,7 +40,7 @@ The **one-click bundle** below is by far the simplest way. use it if you're on C
 <details>
 <summary><strong>Claude Desktop — one-click (recommended)</strong></summary>
 
-1. Download **`ry-ai-assistant.mcpb`** from the [releases page](https://github.com/requirement-yogi/ry-ai-assistant/releases/latest/download/ry-ai-assistant-installer.mcpb).
+1. Download **`ry-ai-assistant.mcpb`** from the [releases page](https://github.com/requirement-yogi/ry-ai-assistant/releases/latest/download/ry-ai-assistant.mcpb).
 2. Double-click the file — Claude Desktop opens its installer. (Or, in Claude Desktop: **Settings → Extensions → Install extension…** and pick the file.)
 3. Fill the installation wizard form: 
    - set **Data residency** to `EU` or `US`, 
