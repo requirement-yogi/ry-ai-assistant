@@ -3,7 +3,7 @@ import { withTelemetry, TOOL_NAMES } from "../../src/tools/registry.js"
 import { RyApiError, RyAmbiguityError } from "../../src/errors.js"
 
 // registry.ts is the choke point every tool passes through, so what it does on failure IS the
-// error behaviour of all nine tools. A thrown error must come back as an `isError` tool result the
+// error behaviour of every registered tool. A thrown error must come back as an `isError` tool result the
 // LLM can read and react to — never as a protocol-level crash, which the client surfaces as a dead
 // tool with no explanation.
 //

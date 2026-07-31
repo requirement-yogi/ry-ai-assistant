@@ -54,6 +54,16 @@ import {
   type Relationship,
   type SearchPage,
 } from "./dto.js"
+import {
+  BACKEND_FILLED_ACCOUNT,
+  SavedMatrixSchema,
+  TraceabilityResultSchema,
+  type MatrixDefinition,
+  type SavedMatrix,
+  type SavedMatrixFilters,
+  type SavedMatrixPayload,
+  type TraceabilityResult,
+} from "./traceabilityDto.js"
 
 // Prod hosts, selected by data residency. The `/api` suffix is part of the standalone base
 // (the paths — /applications, /relationships… — don't carry it); the Confluence paths already
@@ -83,6 +93,9 @@ const SEARCH_PAGE_SIZE = 200
 // One page size for every standalone-API endpoint (organizations, applications, relationships):
 // they share the same { items, offset, limit, total } envelope, so they page identically.
 const STANDALONE_PAGE_SIZE = 100
+// Default page size for the saved-matrix list. Smaller than the search page: this is a browsable
+// list of user-authored queries, and the LLM asks for more only if the user wants more.
+const SAVED_MATRIX_PAGE_SIZE = 50
 
 // Mirrors DTORequirementSelection: which requirements a bulk operation applies to.
 export type RequirementSelection = {
@@ -106,6 +119,25 @@ export type SearchOptions = {
   spaceKey?: string
   offset?: number
   instanceBaseUrl?: string
+}
+
+export type MatrixGenerationOptions = {
+  matrix: MatrixDefinition
+  // Values for the variables the query uses, if any ({} when it uses none).
+  variableValues?: Record<string, unknown>
+  instanceBaseUrl?: string
+}
+
+export type SavedMatrixPageOptions = {
+  filters: SavedMatrixFilters
+  offset?: number
+  limit?: number
+  instanceBaseUrl?: string
+}
+
+export type SavedMatrixPage = {
+  items: SavedMatrix[]
+  total?: number
 }
 
 export type RyClientConfig = {
@@ -169,6 +201,22 @@ export function extractItems(page: unknown): unknown[] {
     }
   }
   return []
+}
+
+// The per-column pagination cursors of a matrix generation request.
+//
+// This array is NOT optional and NOT free-form in length: the backend reads
+// `pagination.columnsPagination.get(column.columnIndex).getLastCellId()` for EVERY column of the
+// definition, so it must hold one entry per column index. Sending `[]` (or anything shorter than the
+// column count) is an IndexOutOfBoundsException on the server, which surfaces as a bare 500 —
+// "An unexpected error has occurred", no `errors`, nothing pointing at the payload.
+//
+// It is sized off the highest columnIndex rather than the array length so it stays correct even for a
+// definition whose columns are not in index order. `lastCellId` is null on a first page: there is no
+// cursor to resume a column from yet.
+export function columnsPagination(matrix: MatrixDefinition): { lastCellId: null }[] {
+  const size = matrix.columns.reduce((highest, column) => Math.max(highest, column.columnIndex + 1), 0)
+  return Array.from({ length: size }, () => ({ lastCellId: null }))
 }
 
 export function pageTotal(page: unknown): number | undefined {
@@ -426,6 +474,130 @@ export class RyClient {
     // report a link that WAS created as a failure.
     if (payload === null) return {}
     return parseApi(BulkLinkResultSchema, payload, "POST /rest/jira-bulk/links")
+  }
+
+  // --- Traceability matrices (Confluence API) --------------------------------------------------
+
+  // POST /rest/traceability/{spaceKey}: renders a matrix definition AND answers with
+  // `columnSuggestions` — the only way to learn which columns a matrix can actually carry, since
+  // there is no "list available columns" endpoint (the backend derives them from the requirements
+  // really present in each column's cells). Requires READ permission on the space.
+  //
+  // `pagination.limit` is taken from the definition's own limit so a single knob drives both what
+  // the server renders and how wide a sample the suggestions are derived from — services/
+  // traceabilityMatrix.ts is what deliberately probes with the full 200 (see DISCOVERY_LIMIT).
+  //
+  // `pagination.columnsPagination` MUST have one entry per column index, or the server throws (see
+  // columnsPagination above). It is derived from the definition here rather than passed in, so a
+  // caller cannot get it out of step with the columns it is sending.
+  async generateTraceabilityMatrix(options: MatrixGenerationOptions): Promise<TraceabilityResult> {
+    const body = {
+      traceabilityMatrix: options.matrix,
+      pagination: {
+        searchOffset: 0,
+        limit: options.matrix.limit,
+        columnsPagination: columnsPagination(options.matrix),
+      },
+      variableValues: options.variableValues ?? {},
+    }
+    // This endpoint reports a payload it cannot handle as a bare 500, with nothing to say what it
+    // choked on — so trace the SHAPE of the definition (never the query text: it is the user's
+    // content, see src/log.ts). Column types and the variant/variable fields are what you need to
+    // compare against the request the RY UI itself sends.
+    logDev(
+      `matrix probe: ${options.matrix.columns.length} column(s) [${options.matrix.columns
+        .map((column) => column.step.type)
+        .join(", ")}], variants=${JSON.stringify(options.matrix.variants)}, limit=${options.matrix.limit}, variableValues=${
+        Object.keys(body.variableValues).length
+      } key(s)`
+    )
+    return parseApi(
+      TraceabilityResultSchema,
+      await this.requestConfluence(
+        `/rest/traceability/${encodeURIComponent(options.matrix.spaceKey)}`,
+        { method: "POST", body: JSON.stringify(body) },
+        options.instanceBaseUrl
+      ),
+      "POST /rest/traceability/{spaceKey}"
+    )
+  }
+
+  // The body of a saved-matrix write, for both the create and the update.
+  //
+  // Every write carries `ownerAccountId: BACKEND_FILLED_ACCOUNT` — the sentinel telling the backend
+  // to resolve the owning account itself. It is injected HERE, in the transport, rather than in the
+  // payload builder, so that it cannot be forgotten on one path and, more importantly, so that no
+  // caller can put a real account id in its place: a client setting the owner would be reassigning
+  // ownership. That is also why `ownerAccountId` is absent from SavedMatrixPayload — the only way it
+  // reaches the wire is through this method.
+  //
+  // `id` rides along on an update (it is in the path AND the body). `status` does NOT come from here:
+  // it is part of what the request asks for, so it comes from toSavedMatrixPayload.
+  private savedMatrixBody(payload: SavedMatrixPayload, id?: number): string {
+    return JSON.stringify({
+      ...payload,
+      ...(id !== undefined ? { id } : {}),
+      ownerAccountId: BACKEND_FILLED_ACCOUNT,
+    })
+  }
+
+  // POST /rest/saved-matrices: persists a saved query. The payload's `json` is the stringified
+  // matrix definition (built by toSavedMatrixPayload, never here).
+  async createSavedMatrix(payload: SavedMatrixPayload, instanceBaseUrl?: string): Promise<SavedMatrix> {
+    const response = await this.requestConfluence(
+      `/rest/saved-matrices`,
+      { method: "POST", body: this.savedMatrixBody(payload) },
+      instanceBaseUrl
+    )
+    // Like the link service, a write can answer with no body. That is a success the server chose
+    // not to detail (we just won't know the new id), NOT a shape error.
+    if (response === null) return {}
+    return parseApi(SavedMatrixSchema, response, "POST /rest/saved-matrices")
+  }
+
+  // PUT /rest/saved-matrices/{id}: replaces an existing saved query.
+  async updateSavedMatrix(id: number, payload: SavedMatrixPayload, instanceBaseUrl?: string): Promise<SavedMatrix> {
+    const response = await this.requestConfluence(
+      `/rest/saved-matrices/${id}`,
+      { method: "PUT", body: this.savedMatrixBody(payload, id) },
+      instanceBaseUrl
+    )
+    if (response === null) return {}
+    return parseApi(SavedMatrixSchema, response, `PUT /rest/saved-matrices/{id}`)
+  }
+
+  // GET /rest/saved-matrices/{id}. The definition lives in the `json` string; parsing it is the
+  // service's job (parseStoredDefinition), not the transport's.
+  async getSavedMatrix(id: number, instanceBaseUrl?: string): Promise<SavedMatrix> {
+    return parseApi(
+      SavedMatrixSchema,
+      await this.requestConfluence(`/rest/saved-matrices/${id}`, undefined, instanceBaseUrl),
+      `GET /rest/saved-matrices/{id}`
+    )
+  }
+
+  // POST /rest/saved-matrices/search?offset=&limit=, body = RYEntityFilters (`owned` is required).
+  // ONE page, not every page: unlike the standalone endpoints this is a user-facing list the LLM
+  // pages through on demand, and a space can hold a lot of saved matrices.
+  async searchSavedMatrices(options: SavedMatrixPageOptions): Promise<SavedMatrixPage> {
+    const params = new URLSearchParams({
+      offset: String(options.offset ?? 0),
+      limit: String(options.limit ?? SAVED_MATRIX_PAGE_SIZE),
+    })
+    const page = await this.requestConfluence(
+      `/rest/saved-matrices/search?${params}`,
+      { method: "POST", body: JSON.stringify(options.filters) },
+      options.instanceBaseUrl
+    )
+    return {
+      items: parseApiItems(SavedMatrixSchema, extractItems(page), "POST /rest/saved-matrices/search"),
+      total: pageTotal(page),
+    }
+  }
+
+  // DELETE /rest/saved-matrices/{id} → 204.
+  async deleteSavedMatrix(id: number, instanceBaseUrl?: string): Promise<void> {
+    await this.requestConfluence(`/rest/saved-matrices/${id}`, { method: "DELETE" }, instanceBaseUrl)
   }
 }
 

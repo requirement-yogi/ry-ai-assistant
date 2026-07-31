@@ -1,6 +1,6 @@
 {
   "name": "ry-ai-assistant",
-  "version": "0.2.1-beta",
+  "version": "0.3.0-beta",
   "description": "MCP server to create and edit Confluence pages with Requirement Yogi macros from an LLM.",
   "type": "module",
   "main": "dist/index.js",

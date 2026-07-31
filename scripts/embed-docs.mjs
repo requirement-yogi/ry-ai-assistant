@@ -81,15 +81,49 @@ const entries = toolFiles.map((name) => {
   return [toolName, rendered]
 })
 
+// src/prompts/matrix_columns.md carries one `## STEP_TYPE` section per traceability column type. It is both
+// included in a tool description (as prose) and split into a per-type map here, so the same sentence
+// serves the model before it calls anything AND inside the `legend` of every discovery response —
+// written once. The heading IS the enum value; completeness against StepType is checked at compile
+// time in src/prompts/descriptions.ts.
+const COLUMNS_DOC = resolve(root, "src/prompts/matrix_columns.md")
+const COLUMN_SECTION_PATTERN = /^##[ \t]+([A-Z][A-Z_0-9]*)[ \t]*$/gm
+
+function columnMeanings() {
+  const document = tidy(stripComments(renderPrompt(COLUMNS_DOC)))
+  const headings = [...document.matchAll(COLUMN_SECTION_PATTERN)]
+  if (headings.length === 0) {
+    throw new Error(`No "## STEP_TYPE" section found in ${relative(root, COLUMNS_DOC)}`)
+  }
+  const meanings = {}
+  headings.forEach((heading, index) => {
+    const type = heading[1]
+    const from = heading.index + heading[0].length
+    const to = index + 1 < headings.length ? headings[index + 1].index : document.length
+    const text = document.slice(from, to).trim()
+    if (!text) throw new Error(`Column meaning for "${type}" is empty in ${relative(root, COLUMNS_DOC)}`)
+    if (meanings[type]) throw new Error(`Column type "${type}" is documented twice in ${relative(root, COLUMNS_DOC)}`)
+    meanings[type] = text
+  })
+  return Object.entries(meanings)
+}
+
+const columns = columnMeanings()
+
 const promptsBanner =
   `// AUTO-GENERATED from src/prompts/**/*.md by scripts/embed-docs.mjs — DO NOT EDIT.\n` +
   `// Edit the markdown sources and re-run \`npm run generate:docs\` (or any build).\n`
-const promptsBody = entries.map(([name, text]) => `  ${JSON.stringify(name)}: ${JSON.stringify(text)},`).join("\n")
-writeFileSync(PROMPTS_OUT, `${promptsBanner}export const TOOL_DESCRIPTIONS = {\n${promptsBody}\n} as const\n`)
+const asRecord = (pairs) => pairs.map(([key, text]) => `  ${JSON.stringify(key)}: ${JSON.stringify(text)},`).join("\n")
+writeFileSync(
+  PROMPTS_OUT,
+  `${promptsBanner}export const TOOL_DESCRIPTIONS = {\n${asRecord(entries)}\n} as const\n\n` +
+    `export const COLUMN_MEANINGS = {\n${asRecord(columns)}\n} as const\n`
+)
 console.log(
   `embed-docs: ${entries.length} tool prompt(s) → src/prompts/index.generated.ts ` +
     `(${entries.reduce((total, [, text]) => total + text.length, 0)} chars)`
 )
+console.log(`embed-docs: ${columns.length} column meaning(s) → COLUMN_MEANINGS`)
 
 // Bake the version from package.json so the server can report it at runtime in both builds.
 const version = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8")).version
