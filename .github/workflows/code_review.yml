@@ -61,6 +61,11 @@ jobs:
 
             Always post the review as a single comment on the PR. Even if you have nothing to report write a comment to
             let the user know that the PR has been reviewed.
+            
+            Be extremely concise and get straight to the point without any preamble or introductory text.
+            
+            Add checkboxes on the different points that needs to be addressed. Use a color code to indicate the severity
+            of the issue.
 
             Use this to post the review:
             gh pr comment ${{ github.event.issue.number }} --body "..."
