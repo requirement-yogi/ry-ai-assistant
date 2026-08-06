@@ -64,8 +64,8 @@ jobs:
             
             Be extremely concise and get straight to the point without any preamble or introductory text.
             
-            Add checkboxes on the different points that needs to be addressed. Use a color code to indicate the severity
-            of the issue.
+            Add checkboxes on the different points that needs to be addressed. 
+            Use a color code to indicate the severity of the issue and a legend to explain the severity.
 
             Use this to post the review:
             gh pr comment ${{ github.event.issue.number }} --body "..."
