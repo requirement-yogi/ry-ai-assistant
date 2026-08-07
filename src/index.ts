@@ -3,7 +3,12 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { registerBuildAdfTool } from "./tools/buildAdf.js"
 import { registerEditPageTool } from "./tools/editPage.js"
-import { registerJiraLinkTools } from "./tools/jiraLinks.js"
+import { registerListOrganizationsTool } from "./tools/list_organizations/tool.js"
+import { registerListApplicationsTool } from "./tools/list_applications/tool.js"
+import { registerListSearchableFieldsTool } from "./tools/list_searchable_fields/tool.js"
+import { registerSearchRequirementsTool } from "./tools/search_requirements/tool.js"
+import { registerListRelationshipsTool } from "./tools/list_relationships/tool.js"
+import { registerLinkRequirementsToJiraTool } from "./tools/link_requirements_to_jira/tool.js"
 import { registerDiscoverMatrixColumnsTool } from "./tools/discover_matrix_columns/tool.js"
 import { registerSaveTraceabilityMatrixTool } from "./tools/save_traceability_matrix/tool.js"
 import { registerGetTraceabilityMatrixTool } from "./tools/get_traceability_matrix/tool.js"
@@ -39,7 +44,12 @@ registerBuildAdfTool(server)
 // Use case 2: analyze an existing page and reshape it so requirements are indexable.
 registerEditPageTool(server)
 // Use case 3: link requirements to Jira issues through the Requirement Yogi API.
-registerJiraLinkTools(server)
+registerListOrganizationsTool(server)
+registerListApplicationsTool(server)
+registerListSearchableFieldsTool(server)
+registerSearchRequirementsTool(server)
+registerListRelationshipsTool(server)
+registerLinkRequirementsToJiraTool(server)
 // Use case 4: create traceability-matrix saved queries (query + column tree) in Requirement Yogi.
 registerDiscoverMatrixColumnsTool(server)
 registerSaveTraceabilityMatrixTool(server)

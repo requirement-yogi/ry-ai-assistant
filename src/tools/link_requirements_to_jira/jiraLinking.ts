@@ -11,8 +11,8 @@
 // to tell what happened. Instead every operation is reported individually.
 
 import { z } from "zod"
-import { ryClient, type JiraBulkLink, type RyClient } from "../core/ryClient.js"
-import type { BulkLinkResult } from "../core/dto.js"
+import { ryClient, type JiraBulkLink, type RyClient } from "../../core/ryClient.js"
+import type { BulkLinkResult } from "../../core/dto.js"
 
 // The one endpoint this service needs, so a test can drive the batch loop (including partial
 // failure) against a fake instead of the real link service.

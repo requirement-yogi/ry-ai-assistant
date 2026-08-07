@@ -70,10 +70,12 @@ export const RequirementPropertySchema = z.looseObject({
   ext: z.boolean().nullish(),
 })
 
-// The fields search_requirements exposes to the LLM — see projectOn below for how a full
-// Requirement gets reduced to this shape. Declaring it as its own schema (rather than a hand-picked
-// field list) makes the exposed shape DATA a prompt generator can read too, not just this file.
-export const RequirementSummarySchema = z.object({
+// A full DTORequirement is huge (storage data, recursive dependencies, rules…). This wire DTO only
+// NAMES the fields any tool needs; everything else still rides along thanks to the loose object.
+// search_requirements owns the separate, stricter schema (tools/search_requirements/dto.ts) it
+// projects this onto to build its actual tool result — that is a feature's OUTPUT contract, not
+// infrastructure, so it does not live here even though the two currently share a field list.
+export const RequirementSchema = z.looseObject({
   id: z.number().int().nullish(),
   key: z.string().nullish(),
   text: z.string().nullish(),
@@ -84,12 +86,6 @@ export const RequirementSummarySchema = z.object({
   canonicalURL: z.string().nullish(),
   properties: z.array(RequirementPropertySchema).nullish(),
 })
-
-// A full DTORequirement is huge (storage data, recursive dependencies, rules…). RequirementSchema
-// only NAMES the fields the linking use case needs; everything else still rides along thanks to
-// `.loose()`, and gets dropped by projectOn(RequirementSummarySchema, …) when the tool summarises
-// the page.
-export const RequirementSchema = RequirementSummarySchema.loose()
 
 // DTOSearchResult<DTORequirement> from GET /rest/search. `results` is a LENIENT array: a single
 // malformed requirement is dropped, not thrown, so it can't sink a 200-item page (and with it a
@@ -115,7 +111,6 @@ export type Organization = z.infer<typeof OrganizationSchema>
 export type Application = z.infer<typeof ApplicationSchema>
 export type Relationship = z.infer<typeof RelationshipSchema>
 export type RequirementProperty = z.infer<typeof RequirementPropertySchema>
-export type RequirementSummary = z.infer<typeof RequirementSummarySchema>
 export type Requirement = z.infer<typeof RequirementSchema>
 export type SearchPage = z.infer<typeof SearchPageSchema>
 export type BulkLinkResult = z.infer<typeof BulkLinkResultSchema>

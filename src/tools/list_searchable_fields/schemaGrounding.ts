@@ -12,8 +12,8 @@
 // returned best-effort, with a caveat in `notes`.
 
 import { z } from "zod"
-import { ryClient, type RyClient } from "../core/ryClient.js"
-import { isExternalProperty, propertyLabel, relationshipName, type Requirement } from "../core/dto.js"
+import { ryClient, type RyClient } from "../../core/ryClient.js"
+import { isExternalProperty, propertyLabel, relationshipName, type Requirement } from "../../core/dto.js"
 
 // Only the two endpoints this service needs — narrow enough that a test can stand in a fake
 // without a network, which is what makes the sampling loop below testable at all.
