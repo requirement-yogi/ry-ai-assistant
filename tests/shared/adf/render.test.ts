@@ -4,8 +4,8 @@ import {
   renderRequirementsTable,
   renderRequirementRows,
   buildRequirementsAdf,
-} from "../../src/tools/adfRender.js"
-import type { RequirementNode, RequirementsTree } from "../../src/schemas/requirements.js"
+} from "../../../src/shared/adf/render.js"
+import type { RequirementNode, RequirementsTree } from "../../../src/shared/adf/requirementsTree.js"
 
 // adfRender is where the Requirement Yogi indexing intelligence lives: it decides WHICH context
 // (table / paragraph / heading) each requirement lands in, and RY only indexes a macro inside one

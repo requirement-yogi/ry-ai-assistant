@@ -2,7 +2,7 @@
 // the from-scratch builder (build_requirements_adf) and the in-place editor
 // (inject_requirement_keys).
 
-import { isDevEnv, requireDevValue } from "../env.js"
+import { isDevEnv, requireDevValue } from "../../env.js"
 
 const EXTENSION_TYPE = "com.atlassian.ecosystem"
 

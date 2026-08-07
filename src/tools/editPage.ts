@@ -1,11 +1,11 @@
 import { z } from "zod"
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
-import { buildInlineExtension } from "./macro.js"
+import { buildInlineExtension } from "../shared/adf/macro.js"
 import {
   renderRequirementsTable,
   renderRequirementParagraph,
   renderRequirementRows,
-} from "./adfRender.js"
+} from "../shared/adf/render.js"
 import { registerTool, toolError, TOOL_NAMES, PURE_COMPUTATION } from "../core/mcp/registry.js"
 
 // Use case 2: analyze an existing page and reshape it so its requirements are indexable. The

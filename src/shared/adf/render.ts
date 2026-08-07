@@ -1,4 +1,4 @@
-import type { RequirementNode, RequirementsTree, Property } from "../schemas/requirements.js"
+import type { RequirementNode, RequirementsTree, Property } from "./requirementsTree.js"
 import { buildInlineExtension } from "./macro.js"
 
 // --- Minimal ADF node shapes ---
