@@ -20,9 +20,9 @@
 // query is written once and read forever, so correctness wins over latency here.
 
 import { z } from "zod"
-import { ryClient, type RyClient } from "../core/ryClient.js"
-import { RyResponseError } from "../core/errors.js"
-import { logDev } from "../core/log.js"
+import { ryClient, type RyClient } from "../../core/ryClient.js"
+import { RyResponseError } from "../../core/errors.js"
+import { logDev } from "../../core/log.js"
 import {
   MATRIX_STATUSES,
   MATRIX_TYPE,
@@ -36,7 +36,7 @@ import {
   type MatrixStatus,
   type SharedLevel,
   type StoredMatrixDefinition,
-} from "../api/traceabilityDto.js"
+} from "./dto.js"
 import {
   candidatesFor,
   columnLegend,

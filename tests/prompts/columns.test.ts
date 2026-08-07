@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { columnMeaning } from "../../src/prompts/descriptions.js"
 import { toolDescription } from "../../src/prompts/descriptions.js"
-import { STEP_TYPES } from "../../src/api/traceabilityDto.js"
+import { STEP_TYPES } from "../../src/shared/traceability/dto.js"
 import { TOOL_NAMES } from "../../src/core/mcp/toolNames.js"
 
 // src/prompts/matrix_columns.md is what turns an enum name into something a model can act on. The failure it

@@ -4,7 +4,7 @@
 
 import { COLUMN_MEANINGS, TOOL_DESCRIPTIONS } from "./index.generated.js"
 import type { ToolName } from "../core/mcp/toolNames.js"
-import type { StepType } from "../api/traceabilityDto.js"
+import type { StepType } from "../shared/traceability/dto.js"
 
 // Completeness is enforced in BOTH directions at compile time:
 //  - a tool declared in TOOL_NAMES with no src/prompts/tools/<name>.md → this assignment fails;

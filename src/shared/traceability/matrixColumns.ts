@@ -16,8 +16,8 @@
 //   3. suggestions are derived from the requirements of the current page, so the probe must use a
 //      full page — that one is enforced by the caller (DISCOVERY_LIMIT).
 
-import { columnMeaning } from "../prompts/descriptions.js"
-import { ColumnSuggestionsSchema } from "../api/traceabilityDto.js"
+import { columnMeaning } from "../../prompts/descriptions.js"
+import { ColumnSuggestionsSchema } from "./dto.js"
 import type {
   ColumnSuggestions,
   ExternalPropertySuggestion,
@@ -25,7 +25,7 @@ import type {
   MatrixColumn,
   MatrixStep,
   StepType,
-} from "../api/traceabilityDto.js"
+} from "./dto.js"
 
 // !! COUNTER-INTUITIVE, AND THE NAIVE MAPPING IS WRONG !!
 // A dependency suggested under `dependencySuggestions.FROM` is reached by a step of type **TO**, and

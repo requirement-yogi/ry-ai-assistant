@@ -63,7 +63,7 @@ import {
   type SavedMatrixFilters,
   type SavedMatrixPayload,
   type TraceabilityResult,
-} from "../api/traceabilityDto.js"
+} from "../shared/traceability/dto.js"
 
 // Prod hosts, selected by data residency. The `/api` suffix is part of the standalone base
 // (the paths — /applications, /relationships… — don't carry it); the Confluence paths already

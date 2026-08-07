@@ -1,8 +1,8 @@
 import { z } from "zod"
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { ryClient } from "../core/ryClient.js"
-import { MATRIX_TYPE, MatrixStatusSchema, SharedLevelSchema, StepTypeSchema } from "../api/traceabilityDto.js"
-import { structuralProblems, type ColumnRequest } from "../services/matrixColumns.js"
+import { MATRIX_TYPE, MatrixStatusSchema, SharedLevelSchema, StepTypeSchema } from "../shared/traceability/dto.js"
+import { structuralProblems, type ColumnRequest } from "../shared/traceability/matrixColumns.js"
 import {
   discoverMatrixColumns,
   formatSaveReport,
@@ -12,7 +12,7 @@ import {
   SavedMatrixListSchema,
   SavedMatrixReadingSchema,
   saveTraceabilityMatrix,
-} from "../services/traceabilityMatrix.js"
+} from "../shared/traceability/matrix.js"
 import { registerTool, toolError, TOOL_NAMES, READS_REMOTE_STATE } from "../core/mcp/registry.js"
 import { RyApiError } from "../core/errors.js"
 

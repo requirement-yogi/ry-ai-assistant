@@ -9,8 +9,8 @@ import {
   structuralProblems,
   SUGGESTION_SIDE_TO_STEP_TYPE,
   type ColumnRequest,
-} from "../../src/services/matrixColumns.js"
-import { ColumnSuggestionsSchema, type ColumnSuggestions } from "../../src/api/traceabilityDto.js"
+} from "../../../src/shared/traceability/matrixColumns.js"
+import { ColumnSuggestionsSchema, type ColumnSuggestions } from "../../../src/shared/traceability/dto.js"
 
 // The point of this module is that a saved matrix is never silently empty. The backend validates
 // only that `columns` is non-empty, so anything these tests let through is something a user would
