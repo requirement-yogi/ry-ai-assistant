@@ -11,4 +11,4 @@ Returns the applications as JSON (all pages are fetched for you). Each item has 
 
 If this tool fails because several organizations are accessible, call list_organizations, ask the user which organization to use, and retry with organization_id.
 
-{{include:../fragments/jira-workflow.md}}
+{{include:../../shared/jira-linking/prompts/jira-workflow.md}}

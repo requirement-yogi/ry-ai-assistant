@@ -2,4 +2,4 @@ USE THIS TOOL to discover the Requirement Yogi organizations the access token ca
 
 Returns the organizations as JSON (id, name, displayName). Ask the user which organization to use — they can find their organization ID in the Requirement Yogi admin panel in Confluence or Jira — then pass it as organization_id to list_applications.
 
-{{include:../fragments/jira-workflow.md}}
+{{include:../../shared/jira-linking/prompts/jira-workflow.md}}

@@ -29,8 +29,8 @@ Keys: if the page already labels a requirement with a key, reuse it verbatim (ne
 requirement has no key yet — e.g. the page only describes the product/features in prose — invent a
 free-form key for it. Propose your analysis and plan to the user and get confirmation before publishing.
 
-{{include:../fragments/key-rules.md}}
+{{include:../../shared/adf/prompts/key-rules.md}}
 
-{{include:../fragments/indexing-contexts.md}}
+{{include:../../shared/adf/prompts/indexing-contexts.md}}
 
 After this tool returns, call updateConfluencePage with the modified ADF and version + 1 to publish.

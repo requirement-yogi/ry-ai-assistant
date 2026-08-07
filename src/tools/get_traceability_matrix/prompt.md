@@ -6,4 +6,4 @@ Read `warnings`: they flag a definition that cannot render (no columns) or a sav
 
 Get the `matrix_id` from list_traceability_matrices, or from the report of save_traceability_matrix.
 
-{{include:../fragments/traceability-workflow.md}}
+{{include:../../shared/traceability/prompts/traceability-workflow.md}}

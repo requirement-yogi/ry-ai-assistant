@@ -15,4 +15,4 @@ Inputs worth care:
 
 The result reports the id of the saved matrix, the validated columns, and any `warnings` — columns that were kept but could not be fully verified (a truncated Jira field list, a Jira relationship name the API does not enumerate). Relay warnings to the user: those columns may still come out empty.
 
-{{include:../fragments/traceability-workflow.md}}
+{{include:../../shared/traceability/prompts/traceability-workflow.md}}

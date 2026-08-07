@@ -9,4 +9,4 @@ Returns JSON with, for the given space:
 
 Escape spaces in a name with a backslash when writing the query (e.g. @Main\ Category). Build the query with search_requirements using ONLY the identifiers returned here (plus the always-available core fields: key, text, page, status, jira…).
 
-{{include:../fragments/jira-workflow.md}}
+{{include:../../shared/jira-linking/prompts/jira-workflow.md}}

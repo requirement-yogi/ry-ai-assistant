@@ -4,4 +4,4 @@ A link between a requirement and a Jira issue is qualified by a relationship (e.
 
 Present the choices to the user and let them pick the relationship to use, unless it is unambiguous.
 
-{{include:../fragments/jira-workflow.md}}
+{{include:../../shared/jira-linking/prompts/jira-workflow.md}}

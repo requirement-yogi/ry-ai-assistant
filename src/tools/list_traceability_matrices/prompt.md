@@ -4,4 +4,4 @@ Filters: `space`, `name`, `owned` (true by default — the user's own matrices; 
 
 Only a summary of each matrix is returned (id, name, description, space, type, status, shared level, query). Call get_traceability_matrix with an id to see its columns.
 
-{{include:../fragments/traceability-workflow.md}}
+{{include:../../shared/traceability/prompts/traceability-workflow.md}}

@@ -16,15 +16,15 @@
 // which the self-contained .mjs bundle can't do. package.json stays the single source of truth
 // for the version (already synced to mcpb/manifest.json by scripts/build-mcpb.mjs).
 
-import { readFileSync, writeFileSync, readdirSync } from "node:fs"
-import { dirname, resolve, relative, basename } from "node:path"
+import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs"
+import { dirname, resolve, relative, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 
-// One .md per MCP tool; the file's basename IS the tool name (checked against TOOL_NAMES at
-// compile time by src/prompts/descriptions.ts).
-const TOOLS_DIR = resolve(root, "src/prompts/tools")
+// One prompt.md per MCP tool folder; the folder's name IS the tool name (checked against
+// TOOL_NAMES at compile time by src/prompts/descriptions.ts).
+const TOOLS_DIR = resolve(root, "src/tools")
 const PROMPTS_OUT = resolve(root, "src/prompts/index.generated.ts")
 
 const INCLUDE_PATTERN = /^[ \t]*\{\{include:\s*([^}\s]+)\s*\}\}[ \t]*$/gm
@@ -66,27 +66,27 @@ function tidy(text) {
   return text.replace(/\n{3,}/g, "\n\n").trim()
 }
 
-const toolFiles = readdirSync(TOOLS_DIR)
-  .filter((name) => name.endsWith(".md"))
-  .sort()
+const toolDirs = readdirSync(TOOLS_DIR).filter((name) => statSync(join(TOOLS_DIR, name)).isDirectory())
 
-if (toolFiles.length === 0) {
+if (toolDirs.length === 0) {
   throw new Error(`No tool prompts found in ${relative(root, TOOLS_DIR)}`)
 }
 
-const entries = toolFiles.map((name) => {
-  const toolName = basename(name, ".md")
-  const rendered = tidy(stripComments(renderPrompt(resolve(TOOLS_DIR, name))))
-  if (!rendered) throw new Error(`Prompt for tool "${toolName}" is empty`)
-  return [toolName, rendered]
-})
+const entries = toolDirs
+  .filter((toolName) => statSync(join(TOOLS_DIR, toolName, "prompt.md"), { throwIfNoEntry: false })?.isFile())
+  .sort()
+  .map((toolName) => {
+    const rendered = tidy(stripComments(renderPrompt(resolve(TOOLS_DIR, toolName, "prompt.md"))))
+    if (!rendered) throw new Error(`Prompt for tool "${toolName}" is empty`)
+    return [toolName, rendered]
+  })
 
-// src/prompts/matrix_columns.md carries one `## STEP_TYPE` section per traceability column type. It is both
-// included in a tool description (as prose) and split into a per-type map here, so the same sentence
-// serves the model before it calls anything AND inside the `legend` of every discovery response —
-// written once. The heading IS the enum value; completeness against StepType is checked at compile
-// time in src/prompts/descriptions.ts.
-const COLUMNS_DOC = resolve(root, "src/prompts/matrix_columns.md")
+// src/shared/traceability/prompts/matrix_columns.md carries one `## STEP_TYPE` section per
+// traceability column type. It is both included in a tool description (as prose) and split into a
+// per-type map here, so the same sentence serves the model before it calls anything AND inside the
+// `legend` of every discovery response — written once. The heading IS the enum value; completeness
+// against StepType is checked at compile time in src/prompts/descriptions.ts.
+const COLUMNS_DOC = resolve(root, "src/shared/traceability/prompts/matrix_columns.md")
 const COLUMN_SECTION_PATTERN = /^##[ \t]+([A-Z][A-Z_0-9]*)[ \t]*$/gm
 
 function columnMeanings() {

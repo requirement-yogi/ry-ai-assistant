@@ -12,8 +12,8 @@ WHY THE LOOP: the suggestions for a column are computed from the requirements re
 
 EMPTY CANDIDATES ARE AN ANSWER: if a column comes back with no candidates, nothing can be attached under it (often because the query matches nothing, or because the requirements there have no dependencies/properties). Do not invent one — tell the user.
 
-{{include:../fragments/traceability-workflow.md}}
+{{include:../../shared/traceability/prompts/traceability-workflow.md}}
 
-{{include:../matrix_columns.md}}
+{{include:../../shared/traceability/prompts/matrix_columns.md}}
 
-{{include:../fragments/search-syntax.md}}
+{{include:../../prompts/fragments/search-syntax.md}}

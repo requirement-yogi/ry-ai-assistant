@@ -8,4 +8,4 @@ Relationship: ID from list_relationships.
 
 Only call it once the Jira issues exist and the user has confirmed the plan (issue structure AND relationship type).
 
-{{include:../fragments/jira-workflow.md}}
+{{include:../../shared/jira-linking/prompts/jira-workflow.md}}

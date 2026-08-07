@@ -14,9 +14,9 @@ Your job is the decomposition: break the user's request into a hierarchy of requ
 a free-form key, a description, and optional properties (label/value). Leave a node's key empty when
 it is only a section grouping its children.
 
-{{include:../fragments/key-rules.md}}
+{{include:../../shared/adf/prompts/key-rules.md}}
 
-{{include:../fragments/indexing-contexts.md}}
+{{include:../../shared/adf/prompts/indexing-contexts.md}}
 
 After this tool returns, publish the ADF with another available tool (e.g. Atlassian MCP
 createConfluencePage) using contentFormat "adf".
