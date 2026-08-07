@@ -70,10 +70,10 @@ export const RequirementPropertySchema = z.looseObject({
   ext: z.boolean().nullish(),
 })
 
-// A full DTORequirement is huge (storage data, recursive dependencies, rules…). This schema
-// declares only the fields the linking use case needs; the rest still rides along thanks to the
-// loose object, and gets dropped when the tool summarises the page.
-export const RequirementSchema = z.looseObject({
+// The fields search_requirements exposes to the LLM — see projectOn below for how a full
+// Requirement gets reduced to this shape. Declaring it as its own schema (rather than a hand-picked
+// field list) makes the exposed shape DATA a prompt generator can read too, not just this file.
+export const RequirementSummarySchema = z.object({
   id: z.number().int().nullish(),
   key: z.string().nullish(),
   text: z.string().nullish(),
@@ -84,6 +84,12 @@ export const RequirementSchema = z.looseObject({
   canonicalURL: z.string().nullish(),
   properties: z.array(RequirementPropertySchema).nullish(),
 })
+
+// A full DTORequirement is huge (storage data, recursive dependencies, rules…). RequirementSchema
+// only NAMES the fields the linking use case needs; everything else still rides along thanks to
+// `.loose()`, and gets dropped by projectOn(RequirementSummarySchema, …) when the tool summarises
+// the page.
+export const RequirementSchema = RequirementSummarySchema.loose()
 
 // DTOSearchResult<DTORequirement> from GET /rest/search. `results` is a LENIENT array: a single
 // malformed requirement is dropped, not thrown, so it can't sink a 200-item page (and with it a
@@ -109,6 +115,7 @@ export type Organization = z.infer<typeof OrganizationSchema>
 export type Application = z.infer<typeof ApplicationSchema>
 export type Relationship = z.infer<typeof RelationshipSchema>
 export type RequirementProperty = z.infer<typeof RequirementPropertySchema>
+export type RequirementSummary = z.infer<typeof RequirementSummarySchema>
 export type Requirement = z.infer<typeof RequirementSchema>
 export type SearchPage = z.infer<typeof SearchPageSchema>
 export type BulkLinkResult = z.infer<typeof BulkLinkResultSchema>
@@ -170,6 +177,20 @@ function filterValidItems<Schema extends z.ZodType>(
 // single bad element failing the enclosing object. Used for the search results array.
 function lenientArray<Schema extends z.ZodType>(schema: Schema, label: string) {
   return z.array(z.unknown()).transform((items) => filterValidItems(schema, items, label))
+}
+
+// Projects an already-validated value onto a STRICTER schema — a plain z.object strips whatever
+// key its shape doesn't declare, so this is how a wide/loose DTO (e.g. RequirementSchema, which
+// carries unknown fields via `.loose()`) gets reduced to the narrower shape a tool actually returns
+// (e.g. RequirementSummarySchema). Null/undefined fields are dropped too: an explicit "key": null
+// is noise in a tool result, and a lenient DTO already treats null and absent the same way.
+export function projectOn<Schema extends z.ZodType>(schema: Schema, value: unknown): z.infer<Schema> {
+  const parsed = schema.parse(value) as Record<string, unknown>
+  const projected: Record<string, unknown> = {}
+  for (const [key, fieldValue] of Object.entries(parsed)) {
+    if (fieldValue !== null && fieldValue !== undefined) projected[key] = fieldValue
+  }
+  return projected as z.infer<Schema>
 }
 
 // --- Field accessors ------------------------------------------------------------------------

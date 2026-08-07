@@ -1,7 +1,14 @@
 import { z } from "zod"
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { ryClient } from "../api/ryClient.js"
-import { ApplicationSchema, OrganizationSchema, RelationshipSchema, type Requirement, type SearchPage } from "../api/dto.js"
+import {
+  ApplicationSchema,
+  OrganizationSchema,
+  RelationshipSchema,
+  RequirementSummarySchema,
+  projectOn,
+  type SearchPage,
+} from "../api/dto.js"
 import { listSearchableFields, SearchableFieldsSchema } from "../services/schemaGrounding.js"
 import { createJiraLinkBatch, formatLinkReport, LinkReportSchema } from "../services/jiraLinking.js"
 import { registerTool, TOOL_NAMES, READS_REMOTE_STATE, CREATES_LINKS } from "./registry.js"
@@ -22,33 +29,11 @@ import { RyApiError } from "../errors.js"
 // spelled out for it once in src/prompts/fragments/jira-workflow.md and included by each of them.
 
 // The /rest/search response is a DTOSearchResult<DTORequirement>. A full DTORequirement is
-// huge (storage data, recursive dependencies, rules…); trim each result to the fields that
-// matter for the linking use case, and keep the pagination envelope + query feedback.
-const REQUIREMENT_SUMMARY_FIELDS = [
-  "id",
-  "key",
-  "text",
-  "applicationId",
-  "containerId",
-  "variantId",
-  "status",
-  "canonicalURL",
-  "properties",
-] as const
-
-// Nulls are dropped as well as undefined: the DTO accepts null for every optional field (the API
-// sends both), and an explicit `"key": null` is noise in a tool result.
-function summarizeRequirement(requirement: Requirement): Record<string, unknown> {
-  const summary: Record<string, unknown> = {}
-  for (const field of REQUIREMENT_SUMMARY_FIELDS) {
-    const value = requirement[field]
-    if (value !== undefined && value !== null) summary[field] = value
-  }
-  return summary
-}
-
+// huge (storage data, recursive dependencies, rules…); project each result onto
+// RequirementSummarySchema (dto.ts) to keep only the fields that matter for the linking use case,
+// and keep the pagination envelope + query feedback as-is.
 export function summarizeSearchPage(page: SearchPage) {
-  const requirements = (page.results ?? []).map(summarizeRequirement)
+  const requirements = (page.results ?? []).map((requirement) => projectOn(RequirementSummarySchema, requirement))
   // Only claim a total we actually know. The API usually sends `total`; when it doesn't, this page
   // is the whole result set ONLY if there are no more pages (no hasNext). Reporting `returned` as
   // the total when hasNext is true would tell the model the query is well-scoped and stop it
