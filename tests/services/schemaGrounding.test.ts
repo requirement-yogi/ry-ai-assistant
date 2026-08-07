@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { collectProperties, listSearchableFields, type SchemaGroundingApi } from "../../src/services/schemaGrounding.js"
-import { RequirementSchema, type Requirement, type SearchPage } from "../../src/api/dto.js"
+import { RequirementSchema, type Requirement, type SearchPage } from "../../src/core/dto.js"
 
 // The point of schema grounding is that the LLM only ever writes field names that really exist.
 // If collectProperties misses a spelling the API uses, a real property silently disappears from

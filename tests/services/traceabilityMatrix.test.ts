@@ -14,8 +14,8 @@ import {
   type TraceabilityApi,
 } from "../../src/services/traceabilityMatrix.js"
 import { SavedMatrixSchema, type MatrixDefinition, type SavedMatrixPayload } from "../../src/api/traceabilityDto.js"
-import { RyResponseError } from "../../src/errors.js"
-import type { MatrixGenerationOptions, SavedMatrixPageOptions } from "../../src/api/ryClient.js"
+import { RyResponseError } from "../../src/core/errors.js"
+import type { MatrixGenerationOptions, SavedMatrixPageOptions } from "../../src/core/ryClient.js"
 
 // These tests drive the two loops the feature is built on — the discovery probe and the
 // column-by-column validation before persisting — against a fake client, which is exactly why the

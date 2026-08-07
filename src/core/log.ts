@@ -9,7 +9,7 @@
 // call — which tool/endpoint, how long, and how it ended — which is what you actually need when
 // debugging a session.
 
-import { isDevEnv } from "./env.js"
+import { isDevEnv } from "../env.js"
 
 export function logDev(...parts: unknown[]): void {
   if (isDevEnv()) console.error("[ry-dev]", ...parts)

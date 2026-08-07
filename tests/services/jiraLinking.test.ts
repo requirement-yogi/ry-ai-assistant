@@ -8,8 +8,8 @@ import {
   type LinkReport,
   type LinkRequest,
 } from "../../src/services/jiraLinking.js"
-import type { BulkLinkResult } from "../../src/api/dto.js"
-import type { JiraBulkLink } from "../../src/api/ryClient.js"
+import type { BulkLinkResult } from "../../src/core/dto.js"
+import type { JiraBulkLink } from "../../src/core/ryClient.js"
 
 // link_requirements_to_jira is the only tool that writes. What it reports back therefore has to be
 // unambiguous: the model decides from this text whether to retry, and a retry that shouldn't have

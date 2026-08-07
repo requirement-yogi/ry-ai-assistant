@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
-import { getUpdateCheck, formatUpdateSummary } from "../updateCheck.js"
-import { UpdateCheckSchema } from "../api/githubReleases.js"
+import { getUpdateCheck, formatUpdateSummary } from "../core/updateCheck.js"
+import { UpdateCheckSchema } from "../core/githubReleases.js"
 import { registerTool, TOOL_NAMES, READS_REMOTE_STATE } from "./registry.js"
 
 // check_for_updates — the ON-DEMAND "is this MCP up to date?" check. The automatic once-per-session

@@ -9,8 +9,8 @@ import {
   parseApiItems,
   propertyLabel,
   relationshipName,
-} from "../../src/api/dto.js"
-import { RyResponseError } from "../../src/errors.js"
+} from "../../src/core/dto.js"
+import { RyResponseError } from "../../src/core/errors.js"
 
 // These schemas guard the frontier with an API whose exact shape is still being confirmed. The
 // balance they have to strike: tolerate everything we merely haven't catalogued (unknown fields,

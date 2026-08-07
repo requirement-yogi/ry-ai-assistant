@@ -37,8 +37,8 @@
 //                                    standalone API (auto-resolved and cached per client).
 
 import { isDevEnv, requireDevValue } from "../env.js"
-import { logDev } from "../log.js"
-import { RyAmbiguityError, RyApiError, RyConfigError, RyConnectionError, RyResponseError } from "../errors.js"
+import { logDev } from "./log.js"
+import { RyAmbiguityError, RyApiError, RyConfigError, RyConnectionError, RyResponseError } from "./errors.js"
 import {
   ApplicationSchema,
   BulkLinkResultSchema,
@@ -63,7 +63,7 @@ import {
   type SavedMatrixFilters,
   type SavedMatrixPayload,
   type TraceabilityResult,
-} from "./traceabilityDto.js"
+} from "../api/traceabilityDto.js"
 
 // Prod hosts, selected by data residency. The `/api` suffix is part of the standalone base
 // (the paths — /applications, /relationships… — don't carry it); the Confluence paths already

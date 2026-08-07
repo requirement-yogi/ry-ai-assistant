@@ -20,8 +20,8 @@
 //     Confluence call after it). Dropped items are logged in dev.
 
 import { z } from "zod"
-import { RyResponseError } from "../errors.js"
-import { logDev } from "../log.js"
+import { RyResponseError } from "./errors.js"
+import { logDev } from "./log.js"
 
 // Known values of DTOApplication.type. Kept as a plain string in the schema on purpose: a new
 // application type on the backend must not break discovery, it just won't match these constants.

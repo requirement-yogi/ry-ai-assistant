@@ -5,7 +5,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
 import { registerTraceabilityTools } from "../../src/tools/traceability.js"
 import { TOOL_NAMES } from "../../src/tools/toolNames.js"
 import { STEP_TYPES } from "../../src/api/traceabilityDto.js"
-import { resetRyClient } from "../../src/api/ryClient.js"
+import { resetRyClient } from "../../src/core/ryClient.js"
 
 // The traceability tools as a CLIENT sees them, over a real (in-memory) MCP connection.
 //

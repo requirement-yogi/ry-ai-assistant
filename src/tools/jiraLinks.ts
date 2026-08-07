@@ -1,6 +1,6 @@
 import { z } from "zod"
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
-import { ryClient } from "../api/ryClient.js"
+import { ryClient } from "../core/ryClient.js"
 import {
   ApplicationSchema,
   OrganizationSchema,
@@ -8,11 +8,11 @@ import {
   RequirementSummarySchema,
   projectOn,
   type SearchPage,
-} from "../api/dto.js"
+} from "../core/dto.js"
 import { listSearchableFields, SearchableFieldsSchema } from "../services/schemaGrounding.js"
 import { createJiraLinkBatch, formatLinkReport, LinkReportSchema } from "../services/jiraLinking.js"
 import { registerTool, TOOL_NAMES, READS_REMOTE_STATE, CREATES_LINKS } from "./registry.js"
-import { RyApiError } from "../errors.js"
+import { RyApiError } from "../core/errors.js"
 
 // Use case 3: link Requirement Yogi requirements to Jira issues.
 //

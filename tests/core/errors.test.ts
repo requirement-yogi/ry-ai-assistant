@@ -6,7 +6,7 @@ import {
   RyAmbiguityError,
   RyConnectionError,
   formatToolFailure,
-} from "../src/errors.js"
+} from "../../src/core/errors.js"
 
 describe("the error taxonomy", () => {
   it("keeps instanceof working so callers can branch on the failure kind", () => {

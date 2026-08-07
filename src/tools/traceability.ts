@@ -1,6 +1,6 @@
 import { z } from "zod"
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
-import { ryClient } from "../api/ryClient.js"
+import { ryClient } from "../core/ryClient.js"
 import { MATRIX_TYPE, MatrixStatusSchema, SharedLevelSchema, StepTypeSchema } from "../api/traceabilityDto.js"
 import { structuralProblems, type ColumnRequest } from "../services/matrixColumns.js"
 import {
@@ -14,7 +14,7 @@ import {
   saveTraceabilityMatrix,
 } from "../services/traceabilityMatrix.js"
 import { registerTool, toolError, TOOL_NAMES, READS_REMOTE_STATE } from "./registry.js"
-import { RyApiError } from "../errors.js"
+import { RyApiError } from "../core/errors.js"
 
 // Use case 4: traceability matrices — persisted { RQL query + column tree } saved queries.
 //

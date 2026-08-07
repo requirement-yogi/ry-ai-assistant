@@ -14,7 +14,7 @@
 // never a computed process.env[name]. So every baked var must be read as a literal member
 // expression at the call site and the value passed in — hence requireDevValue takes the value.
 
-import { RyConfigError } from "./errors.js"
+import { RyConfigError } from "./core/errors.js"
 
 export function isDevEnv(): boolean {
   return process.env.RY_ENV?.trim().toLowerCase() === "dev"

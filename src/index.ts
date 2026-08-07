@@ -6,7 +6,7 @@ import { registerEditPageTool } from "./tools/editPage.js"
 import { registerJiraLinkTools } from "./tools/jiraLinks.js"
 import { registerTraceabilityTools } from "./tools/traceability.js"
 import { registerUpdatesTool } from "./tools/updates.js"
-import { startUpdateCheck } from "./updateCheck.js"
+import { startUpdateCheck } from "./core/updateCheck.js"
 import { VERSION } from "./version.generated.js"
 
 const server = new McpServer(

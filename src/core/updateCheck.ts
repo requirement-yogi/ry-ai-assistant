@@ -9,8 +9,8 @@
 // result is cached. The banner is surfaced at most once, and only when an update is actually
 // available — so it costs nothing on every subsequent tool call.
 
-import { fetchLatestRelease, type UpdateCheck } from "./api/githubReleases.js"
-import { VERSION } from "./version.generated.js"
+import { fetchLatestRelease, type UpdateCheck } from "./githubReleases.js"
+import { VERSION } from "../version.generated.js"
 
 let checkPromise: Promise<UpdateCheck> | undefined
 let resolved: UpdateCheck | undefined
