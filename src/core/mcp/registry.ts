@@ -13,11 +13,11 @@
 import type { McpServer, ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js"
 import type { ZodRawShapeCompat, AnySchema } from "@modelcontextprotocol/sdk/server/zod-compat.js"
 import type { ToolAnnotations, CallToolResult } from "@modelcontextprotocol/sdk/types.js"
-import { sendTelemetry } from "../core/ryClient.js"
-import { takeReadyUpdateNotice } from "../core/updateCheck.js"
-import { toolDescription } from "../prompts/descriptions.js"
-import { formatToolFailure } from "../core/errors.js"
-import { logDev } from "../core/log.js"
+import { sendTelemetry } from "../ryClient.js"
+import { takeReadyUpdateNotice } from "../updateCheck.js"
+import { toolDescription } from "../../prompts/descriptions.js"
+import { formatToolFailure } from "../errors.js"
+import { logDev } from "../log.js"
 import { TOOL_NAMES, type ToolName } from "./toolNames.js"
 
 export { TOOL_NAMES, type ToolName }

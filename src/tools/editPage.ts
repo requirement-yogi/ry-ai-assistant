@@ -6,7 +6,7 @@ import {
   renderRequirementParagraph,
   renderRequirementRows,
 } from "./adfRender.js"
-import { registerTool, toolError, TOOL_NAMES, PURE_COMPUTATION } from "./registry.js"
+import { registerTool, toolError, TOOL_NAMES, PURE_COMPUTATION } from "../core/mcp/registry.js"
 
 // Use case 2: analyze an existing page and reshape it so its requirements are indexable. The
 // description the LLM reads lives in src/prompts/tools/edit_page_requirements.md.

@@ -3,7 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
 import { registerTraceabilityTools } from "../../src/tools/traceability.js"
-import { TOOL_NAMES } from "../../src/tools/toolNames.js"
+import { TOOL_NAMES } from "../../src/core/mcp/toolNames.js"
 import { STEP_TYPES } from "../../src/api/traceabilityDto.js"
 import { resetRyClient } from "../../src/core/ryClient.js"
 

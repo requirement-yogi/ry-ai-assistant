@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { getUpdateCheck, formatUpdateSummary } from "../core/updateCheck.js"
 import { UpdateCheckSchema } from "../core/githubReleases.js"
-import { registerTool, TOOL_NAMES, READS_REMOTE_STATE } from "./registry.js"
+import { registerTool, TOOL_NAMES, READS_REMOTE_STATE } from "../core/mcp/registry.js"
 
 // check_for_updates — the ON-DEMAND "is this MCP up to date?" check. The automatic once-per-session
 // surfacing happens elsewhere: withTelemetry (registry.ts) prepends an update banner to the first

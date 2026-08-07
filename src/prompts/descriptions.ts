@@ -3,7 +3,7 @@
 // resolves it from the tool name, so the prompt and the registration can't drift.
 
 import { COLUMN_MEANINGS, TOOL_DESCRIPTIONS } from "./index.generated.js"
-import type { ToolName } from "../tools/toolNames.js"
+import type { ToolName } from "../core/mcp/toolNames.js"
 import type { StepType } from "../api/traceabilityDto.js"
 
 // Completeness is enforced in BOTH directions at compile time:

@@ -11,7 +11,7 @@ import {
 } from "../core/dto.js"
 import { listSearchableFields, SearchableFieldsSchema } from "../services/schemaGrounding.js"
 import { createJiraLinkBatch, formatLinkReport, LinkReportSchema } from "../services/jiraLinking.js"
-import { registerTool, TOOL_NAMES, READS_REMOTE_STATE, CREATES_LINKS } from "./registry.js"
+import { registerTool, TOOL_NAMES, READS_REMOTE_STATE, CREATES_LINKS } from "../core/mcp/registry.js"
 import { RyApiError } from "../core/errors.js"
 
 // Use case 3: link Requirement Yogi requirements to Jira issues.

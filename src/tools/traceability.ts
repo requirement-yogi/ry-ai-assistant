@@ -13,7 +13,7 @@ import {
   SavedMatrixReadingSchema,
   saveTraceabilityMatrix,
 } from "../services/traceabilityMatrix.js"
-import { registerTool, toolError, TOOL_NAMES, READS_REMOTE_STATE } from "./registry.js"
+import { registerTool, toolError, TOOL_NAMES, READS_REMOTE_STATE } from "../core/mcp/registry.js"
 import { RyApiError } from "../core/errors.js"
 
 // Use case 4: traceability matrices — persisted { RQL query + column tree } saved queries.
