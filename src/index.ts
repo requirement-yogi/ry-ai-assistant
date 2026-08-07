@@ -4,7 +4,10 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { registerBuildAdfTool } from "./tools/buildAdf.js"
 import { registerEditPageTool } from "./tools/editPage.js"
 import { registerJiraLinkTools } from "./tools/jiraLinks.js"
-import { registerTraceabilityTools } from "./tools/traceability.js"
+import { registerDiscoverMatrixColumnsTool } from "./tools/discover_matrix_columns/tool.js"
+import { registerSaveTraceabilityMatrixTool } from "./tools/save_traceability_matrix/tool.js"
+import { registerGetTraceabilityMatrixTool } from "./tools/get_traceability_matrix/tool.js"
+import { registerListTraceabilityMatricesTool } from "./tools/list_traceability_matrices/tool.js"
 import { registerUpdatesTool } from "./tools/updates.js"
 import { startUpdateCheck } from "./core/updateCheck.js"
 import { VERSION } from "./version.generated.js"
@@ -38,7 +41,10 @@ registerEditPageTool(server)
 // Use case 3: link requirements to Jira issues through the Requirement Yogi API.
 registerJiraLinkTools(server)
 // Use case 4: create traceability-matrix saved queries (query + column tree) in Requirement Yogi.
-registerTraceabilityTools(server)
+registerDiscoverMatrixColumnsTool(server)
+registerSaveTraceabilityMatrixTool(server)
+registerGetTraceabilityMatrixTool(server)
+registerListTraceabilityMatricesTool(server)
 
 const transport = new StdioServerTransport()
 await server.connect(transport)
