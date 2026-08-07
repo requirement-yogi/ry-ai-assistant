@@ -16,4 +16,4 @@ EMPTY CANDIDATES ARE AN ANSWER: if a column comes back with no candidates, nothi
 
 {{include:../../shared/traceability/prompts/matrix_columns.md}}
 
-{{include:../../prompts/fragments/search-syntax.md}}
+{{include:../../shared/rql/prompts/search-syntax.md}}

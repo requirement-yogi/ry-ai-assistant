@@ -95,12 +95,14 @@ src/
 │   │   └── prompts/          # key-rules.md, indexing-contexts.md — included by both tools' prompt.md
 │   ├── jira-linking/
 │   │   └── prompts/jira-workflow.md  # the use-case-3 workflow, included by all 6 Jira tools' prompt.md
-│   └── traceability/         # shared by the four matrix tools
-│       ├── dto.ts            # the traceability-matrix contract: StepType (closed enum), Column/MatrixDefinition (what we BUILD, plain TS types), ColumnSuggestions + SavedMatrix (what we PARSE). columnSuggestions is a positional array, so it is NEVER parsed leniently — dropping an entry would shift every column index
-│       ├── matrixColumns.ts  # PURE: suggestions → candidate columns and one requested column → validated column. Owns the FROM/TO inversion, the all*-means-already-used rule and the column-tree invariants
-│       ├── matrix.ts         # the two loops: the discovery probe (one round trip, suggestions for every column) and the column-by-column validation before persisting. Also toSavedMatrixPayload (json stringified, query kept in sync) and the read-back
-│       ├── toolInputs.ts     # the MCP input surface discover_matrix_columns and save_traceability_matrix share verbatim (ColumnInputSchema, MATRIX_INPUT, matrixErrorGuidance) — get/list reuse base_url from it
-│       └── prompts/          # traceability-workflow.md, matrix_columns.md — included by all 4 tools' prompt.md
+│   ├── traceability/         # shared by the four matrix tools
+│   │   ├── dto.ts            # the traceability-matrix contract: StepType (closed enum), Column/MatrixDefinition (what we BUILD, plain TS types), ColumnSuggestions + SavedMatrix (what we PARSE). columnSuggestions is a positional array, so it is NEVER parsed leniently — dropping an entry would shift every column index
+│   │   ├── matrixColumns.ts  # PURE: suggestions → candidate columns and one requested column → validated column. Owns the FROM/TO inversion, the all*-means-already-used rule and the column-tree invariants
+│   │   ├── matrix.ts         # the two loops: the discovery probe (one round trip, suggestions for every column) and the column-by-column validation before persisting. Also toSavedMatrixPayload (json stringified, query kept in sync) and the read-back
+│   │   ├── toolInputs.ts     # the MCP input surface discover_matrix_columns and save_traceability_matrix share verbatim (ColumnInputSchema, MATRIX_INPUT, matrixErrorGuidance) — get/list reuse base_url from it
+│   │   └── prompts/          # traceability-workflow.md, matrix_columns.md — included by all 4 tools' prompt.md
+│   └── rql/
+│       └── prompts/search-syntax.md  # the RQL prompt wrapper — the one fragment shared ACROSS domains (search_requirements AND discover_matrix_columns), so it gets its own domain rather than sitting in either one
 ├── tools/                    # one folder per MCP tool — nothing else lives at this level
 │   ├── check_for_updates/tool.ts        # ON-DEMAND "is this MCP up to date?" tool (the automatic once-per-session banner is injected by core/mcp/registry.ts, not this tool)
 │   ├── build_requirements_adf/tool.ts   # use case 1 — tool wrapper
@@ -117,8 +119,7 @@ src/
 │   └── list_traceability_matrices/tool.ts     # use case 4 — find one
 ├── docs/
 │   └── search-syntax-prompt-v3.md   # AUTHORITATIVE RQL syntax (from the backend ANTLR grammar + DSL eval); single source of truth
-└── prompts/                  # what the LLM reads — EVERYTHING here is markdown or its typed accessor, no business logic
-    ├── fragments/search-syntax.md   # the ONE fragment shared ACROSS domains (search_requirements AND discover_matrix_columns) rather than living under a single shared/<domain>/
+└── prompts/                  # typed access to the generated prompts — no markdown lives here anymore
     ├── descriptions.ts       # typed accessors (toolDescription, columnMeaning); a missing prompt.md/section — or an orphan one — is a COMPILE error, in both directions
     └── index.generated.ts    # AUTO-GENERATED from every tool's prompt.md + the shared prompts/ by embed-docs.mjs (includes resolved, HTML comments stripped)
 scripts/
@@ -152,7 +153,7 @@ Consequences worth knowing:
   Adding a tool means adding it to `TOOL_NAMES` *and* creating `src/tools/<name>/prompt.md`; forgetting
   either is a compile error in `src/prompts/descriptions.ts` (both directions are checked).
 - The RQL reference is still written **once** in `src/docs/search-syntax-prompt-v3.md` and pulled in by
-  `prompts/fragments/search-syntax.md` — edit the markdown, never re-hardcode the syntax.
+  `shared/rql/prompts/search-syntax.md` — edit the markdown, never re-hardcode the syntax.
 
 ### Failures
 
@@ -298,8 +299,8 @@ The MCP owns the Requirement Yogi side; the Jira side is delegated to the Atlass
 - Reliable RQL is achieved through **three complementary mechanisms**:
   1. **Reference in context** — the authoritative RQL syntax (`src/docs/search-syntax-prompt-v3.md`,
      derived from the backend ANTLR grammar + DSL eval) is embedded in the `search_requirements`
-     tool description via `src/prompts/fragments/search-syntax.md` (kept centrally since it's the
-     one fragment shared across two different tool domains — search_requirements AND
+     tool description via `src/shared/rql/prompts/search-syntax.md` (its own shared domain, since
+     it's the one fragment used across two different tool domains — search_requirements AND
      discover_matrix_columns), which includes it at build time (never hardcoded).
   2. **Schema grounding** — `list_searchable_fields(space)` returns the space's REAL identifiers so
      the LLM can't invent names (its description says to call it first if unsure). It is built from

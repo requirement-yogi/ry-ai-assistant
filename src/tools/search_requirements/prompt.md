@@ -10,6 +10,6 @@ SELF-CORRECTION: if the query has a syntax error the tool returns the server's R
 
 CRITICAL: the query is a structured "field operator value" expression, never a free-text search box. A bare key or word is invalid — e.g. to find requirement BREW-F-01 send key = 'BREW-F-01', NOT BREW-F-01 on its own. When no field is specified, default to `key`.
 
-{{include:../../prompts/fragments/search-syntax.md}}
+{{include:../../shared/rql/prompts/search-syntax.md}}
 
 {{include:../../shared/jira-linking/prompts/jira-workflow.md}}
