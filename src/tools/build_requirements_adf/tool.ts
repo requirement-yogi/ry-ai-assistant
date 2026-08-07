@@ -1,8 +1,8 @@
 import { z } from "zod"
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
-import { RequirementsTreeSchema } from "../shared/adf/requirementsTree.js"
-import { buildRequirementsAdf } from "../shared/adf/render.js"
-import { registerTool, toolError, TOOL_NAMES, PURE_COMPUTATION } from "../core/mcp/registry.js"
+import { RequirementsTreeSchema } from "../../shared/adf/requirementsTree.js"
+import { buildRequirementsAdf } from "../../shared/adf/render.js"
+import { registerTool, toolError, TOOL_NAMES, PURE_COMPUTATION } from "../../core/mcp/registry.js"
 
 // Use case 1: render a brand-new Confluence page from a requirements tree. The description the LLM
 // reads lives in src/prompts/tools/build_requirements_adf.md.

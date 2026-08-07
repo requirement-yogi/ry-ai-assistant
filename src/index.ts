@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
-import { registerBuildAdfTool } from "./tools/buildAdf.js"
-import { registerEditPageTool } from "./tools/editPage.js"
+import { registerBuildAdfTool } from "./tools/build_requirements_adf/tool.js"
+import { registerEditPageTool } from "./tools/edit_page_requirements/tool.js"
 import { registerListOrganizationsTool } from "./tools/list_organizations/tool.js"
 import { registerListApplicationsTool } from "./tools/list_applications/tool.js"
 import { registerListSearchableFieldsTool } from "./tools/list_searchable_fields/tool.js"
@@ -13,7 +13,7 @@ import { registerDiscoverMatrixColumnsTool } from "./tools/discover_matrix_colum
 import { registerSaveTraceabilityMatrixTool } from "./tools/save_traceability_matrix/tool.js"
 import { registerGetTraceabilityMatrixTool } from "./tools/get_traceability_matrix/tool.js"
 import { registerListTraceabilityMatricesTool } from "./tools/list_traceability_matrices/tool.js"
-import { registerUpdatesTool } from "./tools/updates.js"
+import { registerUpdatesTool } from "./tools/check_for_updates/tool.js"
 import { startUpdateCheck } from "./core/updateCheck.js"
 import { VERSION } from "./version.generated.js"
 

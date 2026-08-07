@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { anchoredInject, applyReplace, applyInsertAfter, blockText } from "../../src/tools/editPage.js"
+import { anchoredInject, applyReplace, applyInsertAfter, blockText } from "../../../src/tools/edit_page_requirements/tool.js"
 
 // These helpers rewrite a REAL Confluence page's ADF in place. The invariant that matters is that
 // everything which is not a requirement survives untouched — including the layout/panel structure
