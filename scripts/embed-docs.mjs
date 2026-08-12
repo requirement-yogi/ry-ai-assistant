@@ -1,6 +1,7 @@
-// Build-time codegen: embeds the tool descriptions (src/prompts/**/*.md) into a TypeScript module
-// so they can be imported by both build paths — `tsc` → dist/ and the esbuild self-contained
-// bundle — from a SINGLE source of truth.
+// Build-time codegen: embeds the tool descriptions (src/features/*/prompt.md and the shared
+// fragments they include from src/shared/**/prompts/*.md) into a TypeScript module so they can be
+// imported by both build paths — `tsc` → dist/ and the esbuild self-contained bundle — from a
+// SINGLE source of truth.
 //
 // Why prompts live in markdown rather than in the tool files: a tool description IS prompt
 // content, not code. Keeping it in .md means tuning what the model reads never touches a file
@@ -15,6 +16,11 @@
 // server knows its own version (for the update check) without reading package.json at runtime —
 // which the self-contained .mjs bundle can't do. package.json stays the single source of truth
 // for the version (already synced to mcpb/manifest.json by scripts/build-mcpb.mjs).
+//
+// It also derives TOOL_NAMES/ToolName, written into the SAME index.generated.ts as the descriptions
+// (rather than a hand-written enum kept in sync with it by hand), from the very same folder listing.
+// The folder name IS the tool name either way — generating both from one scan, into one file, means
+// writing it once instead of twice, and there is nothing left to drift.
 
 import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs"
 import { dirname, resolve, relative, join } from "node:path"
@@ -22,9 +28,9 @@ import { fileURLToPath } from "node:url"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 
-// One prompt.md per MCP tool folder; the folder's name IS the tool name (checked against
-// TOOL_NAMES at compile time by src/prompts/descriptions.ts).
-const TOOLS_DIR = resolve(root, "src/tools")
+// One prompt.md per MCP tool folder; the folder's name IS the tool name — also the source TOOL_NAMES
+// is generated from, below.
+const TOOLS_DIR = resolve(root, "src/features")
 const PROMPTS_OUT = resolve(root, "src/prompts/index.generated.ts")
 
 const INCLUDE_PATTERN = /^[ \t]*\{\{include:\s*([^}\s]+)\s*\}\}[ \t]*$/gm
@@ -81,6 +87,13 @@ const entries = toolDirs
     return [toolName, rendered]
   })
 
+// TOOL_NAMES's keys are the friendly camelCase accessor (`TOOL_NAMES.checkForUpdates`) so call sites
+// get typo-safety and rename support instead of spelling out the snake_case wire name; the VALUES are
+// that snake_case name, taken straight from `entries` so this can never list a tool the descriptions
+// don't also have (same source, one pass).
+const toCamelCase = (snakeCase) => snakeCase.replace(/_([a-z0-9])/g, (_match, char) => char.toUpperCase())
+const toolNameEntries = entries.map(([toolName]) => [toCamelCase(toolName), toolName])
+
 // src/shared/traceability/prompts/matrix_columns.md carries one `## STEP_TYPE` section per
 // traceability column type. It is both included in a tool description (as prose) and split into a
 // per-type map here, so the same sentence serves the model before it calls anything AND inside the
@@ -111,19 +124,22 @@ function columnMeanings() {
 const columns = columnMeanings()
 
 const promptsBanner =
-  `// AUTO-GENERATED from src/prompts/**/*.md by scripts/embed-docs.mjs — DO NOT EDIT.\n` +
-  `// Edit the markdown sources and re-run \`npm run generate:docs\` (or any build).\n`
+  `// AUTO-GENERATED from src/features/*/prompt.md + src/shared/**/prompts/*.md by scripts/embed-docs.mjs — DO NOT EDIT.\n` +
+  `// Edit the markdown sources (or add/remove a src/features/<name>/ folder) and re-run\n` +
+  `// \`npm run generate:docs\` (or any build).\n`
 const asRecord = (pairs) => pairs.map(([key, text]) => `  ${JSON.stringify(key)}: ${JSON.stringify(text)},`).join("\n")
+const toolNamesRecord = toolNameEntries.map(([key, value]) => `  ${key}: ${JSON.stringify(value)},`).join("\n")
 writeFileSync(
   PROMPTS_OUT,
   `${promptsBanner}export const TOOL_DESCRIPTIONS = {\n${asRecord(entries)}\n} as const\n\n` +
-    `export const COLUMN_MEANINGS = {\n${asRecord(columns)}\n} as const\n`
+    `export const COLUMN_MEANINGS = {\n${asRecord(columns)}\n} as const\n\n` +
+    `export const TOOL_NAMES = {\n${toolNamesRecord}\n} as const\n\n` +
+    `export type ToolName = (typeof TOOL_NAMES)[keyof typeof TOOL_NAMES]\n`
 )
 console.log(
-  `embed-docs: ${entries.length} tool prompt(s) → src/prompts/index.generated.ts ` +
-    `(${entries.reduce((total, [, text]) => total + text.length, 0)} chars)`
+  `embed-docs: ${entries.length} tool prompt(s), ${columns.length} column meaning(s), ${toolNameEntries.length} tool name(s) ` +
+    `→ src/prompts/index.generated.ts (${entries.reduce((total, [, text]) => total + text.length, 0)} chars)`
 )
-console.log(`embed-docs: ${columns.length} column meaning(s) → COLUMN_MEANINGS`)
 
 // Bake the version from package.json so the server can report it at runtime in both builds.
 const version = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8")).version

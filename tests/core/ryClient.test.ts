@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest"
-import { columnsPagination, extractItems, pageTotal, resetRyClient, ryClient, RyClient } from "../../src/core/ryClient.js"
+import { columnsPagination, extractItems, pageTotal, resetRyClient, ryClient, RyClient } from "../../src/core/api/ryClient.js"
 import { RyAmbiguityError, RyApiError, RyConfigError, RyConnectionError, RyResponseError } from "../../src/core/errors.js"
 import { BACKEND_FILLED_ACCOUNT, type MatrixDefinition } from "../../src/shared/traceability/dto.js"
 

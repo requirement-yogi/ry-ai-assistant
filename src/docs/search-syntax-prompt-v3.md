@@ -119,6 +119,7 @@ explicitly needs them: `id`, `new_key`, `new_space_key`, `container`,
 
 ```
 keys starting with BR                    key ~ 'BR-%'
+keys ending with -001                    key ~ '%-001'
 text contains "login"                    text ~ '%login%'
 Category is Functional                   @Category = 'Functional'
 property "Main Category" set             @Main\ Category IS NOT NULL

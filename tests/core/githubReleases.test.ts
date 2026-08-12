@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { compareSemver, parseSemver, buildUpdateCheck } from "../../src/core/githubReleases.js"
+import { compareSemver, parseSemver, buildUpdateCheck } from "../../src/core/updateCheck/githubReleases.js"
 
 describe("parseSemver", () => {
   it("parses plain, v-prefixed and prerelease versions", () => {
