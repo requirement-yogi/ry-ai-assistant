@@ -6,7 +6,7 @@
 // projectOn (core/dto.ts) can reduce a full Requirement onto.
 
 import { z } from "zod"
-import { RequirementPropertySchema } from "../../core/dto.js"
+import { RequirementPropertiesSchema } from "../../core/dto.js"
 
 export const RequirementSummarySchema = z.object({
   id: z.number().int().nullish(),
@@ -17,7 +17,7 @@ export const RequirementSummarySchema = z.object({
   variantId: z.number().int().nullish(),
   status: z.string().nullish(),
   canonicalURL: z.string().nullish(),
-  properties: z.array(RequirementPropertySchema).nullish(),
+  properties: RequirementPropertiesSchema.nullish(),
 })
 
 export type RequirementSummary = z.infer<typeof RequirementSummarySchema>

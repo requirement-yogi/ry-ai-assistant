@@ -14,7 +14,7 @@ describe("summarizeSearchPage", () => {
           variantId: 30,
           status: "CURRENT",
           canonicalURL: "https://x/1",
-          properties: [{ label: "Priority", value: "High" }],
+          properties: { Priority: { label: "Priority", value: "High" } },
           // heavy fields that must be dropped
           storage: "<huge/>",
           dependencies: [{ id: 999 }],
@@ -45,7 +45,7 @@ describe("summarizeSearchPage", () => {
           variantId: 30,
           status: "CURRENT",
           canonicalURL: "https://x/1",
-          properties: [{ label: "Priority", value: "High" }],
+          properties: { Priority: { label: "Priority", value: "High" } },
         },
       ],
     })

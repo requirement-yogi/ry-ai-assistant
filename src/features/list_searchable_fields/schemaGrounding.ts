@@ -73,9 +73,8 @@ function collectNamed(value: unknown, into: Set<string>, ...names: string[]): vo
 }
 
 export function collectProperties(requirement: Requirement, plain: Set<string>, external: Set<string>): void {
-  for (const property of requirement.properties ?? []) {
-    const label = propertyLabel(property)
-    if (!label) continue
+  for (const [name, property] of Object.entries(requirement.properties ?? {})) {
+    const label = propertyLabel(property) ?? name
     ;(isExternalProperty(property) ? external : plain).add(label)
   }
 }

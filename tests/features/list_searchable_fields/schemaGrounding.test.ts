@@ -6,35 +6,43 @@ import { RequirementSchema, type Requirement, type SearchPage } from "../../../s
 // If collectProperties misses a spelling the API uses, a real property silently disappears from
 // list_searchable_fields and the model goes back to guessing.
 
-const requirement = (properties: unknown[]): Requirement =>
+// `properties` is a MAP keyed by property name (confirmed from a real /rest/search payload), not
+// a list — the map key IS the name; label/name/key on the value only override it when the API
+// happens to send one of those still-unconfirmed spellings.
+const requirement = (properties: Record<string, unknown>): Requirement =>
   RequirementSchema.parse({ id: 1, properties })
 
 describe("collectProperties", () => {
-  it("accepts the three spellings the API uses for a property name", () => {
+  it("uses the map key as the property name", () => {
     const plain = new Set<string>()
     const external = new Set<string>()
     collectProperties(
-      requirement([
-        { label: "Priority", value: "High" },
-        { name: "Status", value: "Open" },
-        { key: "Category", value: "A" },
-      ]),
+      requirement({
+        Priority: { key: "Priority", value: "High" },
+        Status: { key: "Status", value: "Open" },
+      }),
       plain,
       external
     )
-    expect([...plain].sort()).toEqual(["Category", "Priority", "Status"])
+    expect([...plain].sort()).toEqual(["Priority", "Status"])
     expect(external.size).toBe(0)
+  })
+
+  it("prefers the value's own label/name/key over the map key when the API sends one", () => {
+    const plain = new Set<string>()
+    collectProperties(requirement({ p1: { label: "Custom Label" }, p2: { name: "Status" } }), plain, new Set())
+    expect([...plain].sort()).toEqual(["Custom Label", "Status"])
   })
 
   it("routes external properties to the ext@ bucket, whichever flag marks them", () => {
     const plain = new Set<string>()
     const external = new Set<string>()
     collectProperties(
-      requirement([
-        { label: "Score", value: "3", external: true },
-        { label: "Weight", value: "2", isExternal: true },
-        { label: "Rank", value: "1", ext: true },
-      ]),
+      requirement({
+        Score: { value: "3", external: true },
+        Weight: { value: "2", isExternal: true },
+        Rank: { value: "1", ext: true },
+      }),
       plain,
       external
     )
@@ -44,15 +52,14 @@ describe("collectProperties", () => {
 
   it("trims whitespace so the same property never appears twice", () => {
     const plain = new Set<string>()
-    collectProperties(requirement([{ label: "  Priority  " }, { label: "Priority" }]), plain, new Set())
+    collectProperties(requirement({ p1: { label: "  Priority  " }, p2: { label: "Priority" } }), plain, new Set())
     expect([...plain]).toEqual(["Priority"])
   })
 
-  it("skips entries with no usable name", () => {
+  it("falls back to the map key when the value carries no label/name/key at all", () => {
     const plain = new Set<string>()
-    const external = new Set<string>()
-    collectProperties(requirement([{ value: "x" }, { label: "   " }]), plain, external)
-    expect(plain.size + external.size).toBe(0)
+    collectProperties(requirement({ Priority: { value: "x" }, Status: { label: "   " } }), plain, new Set())
+    expect([...plain].sort()).toEqual(["Priority", "Status"])
   })
 
   it("handles a requirement with no properties at all", () => {
