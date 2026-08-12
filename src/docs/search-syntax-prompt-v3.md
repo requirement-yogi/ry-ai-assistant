@@ -4,11 +4,6 @@
   SOURCE OF TRUTH: this reference is derived ONLY from the ANTLR grammar
   backend/shared/src/main/antlr4/.../RQL.g4 (structure) and the DSL
   evaluation code under .../features/dsl/model (semantics).
-  It intentionally supersedes search-syntax-prompt.txt and
-  search-syntax-prompt-v2.md, which contained constructs that no longer
-  exist in the grammar (excel, isModified(), hasLastTest(), links,
-  pageHistory, `baseline was`) and a wrong page-title wildcard (*/? — pages
-  actually use % like everything else). Do NOT reintroduce those.
   Only fields/operators reachable from `searchExpression` are listed here;
   calculation/aggregation functions (SUM, COUNT, IF, CONCAT, AVGIF, …) are
   NOT valid in a search query and are deliberately omitted.
@@ -124,6 +119,7 @@ explicitly needs them: `id`, `new_key`, `new_space_key`, `container`,
 
 ```
 keys starting with BR                    key ~ 'BR-%'
+keys ending with -001                    key ~ '%-001'
 text contains "login"                    text ~ '%login%'
 Category is Functional                   @Category = 'Functional'
 property "Main Category" set             @Main\ Category IS NOT NULL

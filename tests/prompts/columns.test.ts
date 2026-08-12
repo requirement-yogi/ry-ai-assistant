@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest"
 import { columnMeaning } from "../../src/prompts/descriptions.js"
 import { toolDescription } from "../../src/prompts/descriptions.js"
-import { STEP_TYPES } from "../../src/api/traceabilityDto.js"
-import { TOOL_NAMES } from "../../src/tools/toolNames.js"
+import { STEP_TYPES } from "../../src/shared/traceability/dto.js"
+import { TOOL_NAMES } from "../../src/prompts/index.generated.js"
 
 // src/prompts/matrix_columns.md is what turns an enum name into something a model can act on. The failure it
 // exists to prevent is real and was observed: asked to "add the pages where the requirements are

@@ -41,8 +41,8 @@ identical for dev and prod** — the only difference is which `.mjs` you point a
   stays a *runtime* choice because a single prod bundle serves both EU and US.
 - **dev** (`build:dev`) bakes `RY_ENV=dev` plus that developer's unique values, read from a
   git-ignored **`.env.dev`** (copy `.env.dev.example`): `RY_DEV_FORGE_ENV_ID` (macro extension id,
-  `src/tools/macro.ts`) and `RY_DEV_CONFLUENCE_URL` / `RY_DEV_STANDALONE_URL` (hosts, `devHosts()`
-  in `src/api/ryClient.ts`).
+  `src/shared/document_indexing/macro.ts`) and `RY_DEV_CONFLUENCE_URL` / `RY_DEV_STANDALONE_URL` (hosts, `devHosts()`
+  in `src/core/ryClient.ts`).
 
 `RY_ENV` / `isDevEnv()` / `requireDevValue()` live in `src/env.ts`. **esbuild `define` only
 substitutes static `process.env.<NAME>` reads** — never a computed `process.env[name]` — so the
@@ -57,96 +57,125 @@ internal only and must not be referenced in the public README.
 
 ## Architecture
 
-Four layers, each depending only on the one below it:
+Organized by FEATURE, not by technical layer: each of the 13 MCP tools is a self-contained folder
+under `src/features/`, since the tool — not the "use case" grouping this doc still talks about — is the
+real unit (it's what an LLM actually calls). Two supporting layers sit underneath:
 
 ```
-tools/      MCP adapters — schemas in, tool result out. No business logic, no catch blocks.
-services/   business logic — what to sample, how to batch, how to report. Knows nothing of MCP.
-api/        transport + typed frontier with the RY APIs. Knows nothing of tools or MCP.
-prompts/    what the LLM reads. Markdown, no code.
+features/<tool_name>/   one folder per MCP tool: its registerTool call, its own schemas, and any
+                        business logic used by that tool ALONE. No business logic is shared between
+                        folders here — if two tools need the same code, it lives in shared/ instead.
+shared/<domain>/        code genuinely used by MORE THAN ONE tool, grouped by the domain it serves
+                        (document indexing for the two ADF tools, matrix logic for the four
+                        traceability tools). Not a dumping ground — a tool's OWN code stays in its
+                        own folder.
+core/                   cross-cutting infra used by (almost) every tool: transport, error taxonomy,
+                        logging, the registerTool choke point. Knows nothing about any one feature.
 ```
 
 ```
 src/
 ├── index.ts                  # MCP server (version from version.generated.ts), sets `instructions`, starts the update check, registers the 13 tools
 ├── version.generated.ts      # AUTO-GENERATED from package.json by embed-docs.mjs — the server's own version (single source: package.json)
-├── errors.ts                 # the error taxonomy: RyConfigError / RyAmbiguityError / RyConnectionError / RyApiError / RyResponseError. Each carries the `guidance` (what to DO), written once here instead of per tool; formatToolFailure renders a failure for the LLM
-├── log.ts                    # logDev — dev-only tracing to STDERR (STDOUT is the JSON-RPC stream). Never logs tokens or tool arguments
-├── updateCheck.ts            # session-level update-check state: caches the GitHub check + emits the once-per-session "update available" banner (shared by updates.ts and registry.ts, no import cycle)
-├── schemas/requirements.ts   # Zod schema + TypeScript types for the requirements tree
-├── prompts/                  # EVERYTHING the LLM reads — markdown only, no logic
-│   ├── tools/<tool name>.md  # one description per tool; the basename IS the tool name
-│   ├── fragments/*.md        # shared blocks included by the above: jira-workflow, traceability-workflow, key-rules, indexing-contexts, search-syntax
-│   ├── columns.md            # what each traceability column type MEANS, one `## STEP_TYPE` section each. Included in a tool description AND parsed into COLUMN_MEANINGS (the discovery `legend`) — see "The column glossary"
-│   ├── descriptions.ts       # typed accessors (toolDescription, columnMeaning); a missing .md/section — or an orphan one — is a COMPILE error, in both directions
-│   └── index.generated.ts    # AUTO-GENERATED from the .md by embed-docs.mjs (includes resolved, HTML comments stripped)
-├── api/                      # transport only — no business logic
-│   ├── dto.ts                # Zod schemas for every RY response + parseApi/parseApiItems. Deliberately lenient (loose objects, optional/nullish fields) since the endpoints are still being confirmed; a mismatch throws a located RyResponseError instead of a silent undefined
-│   ├── traceabilityDto.ts    # the traceability-matrix contract: StepType (closed enum), Column/MatrixDefinition (what we BUILD, plain TS types), ColumnSuggestions + SavedMatrix (what we PARSE). columnSuggestions is a positional array, so it is NEVER parsed leniently — dropping an entry would shift every column index
+├── env.ts                    # RY_ENV / isDevEnv() / requireDevValue() — resolves the baked dev/prod values
+├── core/                     # cross-cutting infra, used by (almost) every tool
+│   ├── errors.ts             # the error taxonomy: RyConfigError / RyAmbiguityError / RyConnectionError / RyApiError / RyResponseError. Each carries the `guidance` (what to DO), written once here instead of per tool; formatToolFailure renders a failure for the LLM
+│   ├── log.ts                # logDev — dev-only tracing to STDERR (STDOUT is the JSON-RPC stream). Never logs tokens or tool arguments
+│   ├── dto.ts                # Zod schemas for every RY wire response + parseApi/parseApiItems/projectOn. Deliberately lenient (loose objects, optional/nullish fields) since the endpoints are still being confirmed; a mismatch throws a located RyResponseError instead of a silent undefined. Does NOT own a tool's own OUTPUT schema (e.g. search_requirements/dto.ts) — only the wire-level DTOs
 │   ├── ryClient.ts           # RyClient class (caches = instance fields, so tests get a clean one) + the lazily-built shared `ryClient()`. In dev traces every call to STDERR; tokens are never logged. Connection failures surface error.cause (ECONNREFUSED/…) instead of a bare "fetch failed"
-│   └── githubReleases.ts     # update check: GET the latest GitHub release + semver compare (best-effort, never throws)
-├── services/                 # business logic, MCP-agnostic. Each takes an injectable `api` (a Pick<RyClient, …>) so it is testable without a network
-│   ├── schemaGrounding.ts    # list_searchable_fields: bounded sampling of a space to return its REAL identifiers
-│   ├── jiraLinking.ts        # MCP snake_case → DTORequirementSelection, batch execution with per-operation partial failure, report rendering
-│   ├── matrixColumns.ts      # PURE: suggestions → candidate columns and one requested column → validated column. Owns the FROM/TO inversion, the all*-means-already-used rule and the column-tree invariants
-│   └── traceabilityMatrix.ts # the two loops: the discovery probe (one round trip, suggestions for every column) and the column-by-column validation before persisting. Also toSavedMatrixPayload (json stringified, query kept in sync) and the read-back
-└── tools/                    # MCP adapters only
-    ├── toolNames.ts          # TOOL_NAMES + ToolName — single source of truth, own module so prompts/ can check against it
-    ├── registry.ts           # THE choke point: registerTool wires description + telemetry + error handling + dev trace + update banner from the tool name alone. Also the shared `annotations` presets
-    ├── updates.ts            # check_for_updates — ON-DEMAND "is this MCP up to date?" tool (the automatic once-per-session banner is injected by registry.ts, not this tool)
-    ├── buildAdf.ts           # build_requirements_adf — tool wrapper (use case 1)
-    ├── editPage.ts           # edit_page_requirements — analyze + reshape an existing page (use case 2)
-    ├── jiraLinks.ts          # the 6 use-case-3 tools (organizations, applications, searchable-fields, search, relationships, links)
-    ├── traceability.ts       # the 4 use-case-4 tools (discover columns, save matrix, get matrix, list matrices)
-    ├── adfRender.ts          # shared deterministic renderers: tree→ADF, table, paragraph (the RY intelligence)
-    └── macro.ts              # buildInlineExtension — shared RY macro node, single source of truth
-docs/
-    └── search-syntax-prompt-v3.md   # AUTHORITATIVE RQL syntax (from the backend ANTLR grammar + DSL eval); single source of truth
+│   ├── githubReleases.ts     # update check: GET the latest GitHub release + semver compare (best-effort, never throws)
+│   ├── updateCheck.ts        # session-level update-check state: caches the GitHub check + emits the once-per-session "update available" banner (shared by features/check_for_updates/tool.ts and toolRegistration/registerTool.ts, no import cycle)
+│   └── toolRegistration/
+│       └── registerTool.ts   # THE choke point: registerTool wires description + telemetry + error handling + dev trace + update banner from the tool name alone. Also the shared `annotations` presets. Gets TOOL_NAMES/ToolName from src/prompts/index.generated.ts (see below)
+├── shared/                   # code shared by MORE than one tool, grouped by the domain it serves
+│   ├── document_indexing/    # shared by build_requirements_adf AND edit_page_requirements
+│   │   ├── requirementsTree.ts # Zod schema + TypeScript types for the requirements tree
+│   │   ├── render.ts         # deterministic renderers: tree→ADF, table, paragraph (the RY intelligence)
+│   │   ├── macro.ts          # buildInlineExtension — shared RY macro node, single source of truth
+│   │   └── prompts/          # key-rules.md, indexing-contexts.md — included by both tools' prompt.md
+│   ├── jira-linking/
+│   │   └── prompts/jira-workflow.md  # the use-case-3 workflow, included by all 6 Jira tools' prompt.md
+│   ├── traceability/         # shared by the four matrix tools
+│   │   ├── dto.ts            # the traceability-matrix contract: StepType (closed enum), Column/MatrixDefinition (what we BUILD, plain TS types), ColumnSuggestions + SavedMatrix (what we PARSE). columnSuggestions is a positional array, so it is NEVER parsed leniently — dropping an entry would shift every column index
+│   │   ├── matrixColumns.ts  # PURE: suggestions → candidate columns and one requested column → validated column. Owns the FROM/TO inversion, the all*-means-already-used rule and the column-tree invariants
+│   │   ├── matrix.ts         # the two loops: the discovery probe (one round trip, suggestions for every column) and the column-by-column validation before persisting. Also toSavedMatrixPayload (json stringified, query kept in sync) and the read-back
+│   │   ├── toolInputs.ts     # the MCP input surface discover_matrix_columns and save_traceability_matrix share verbatim (ColumnInputSchema, MATRIX_INPUT, matrixErrorGuidance) — get/list reuse base_url from it
+│   │   └── prompts/          # traceability-workflow.md, matrix_columns.md — included by all 4 tools' prompt.md
+│   └── rql/
+│       └── prompts/search-syntax.md  # the RQL prompt wrapper — the one fragment shared ACROSS domains (search_requirements AND discover_matrix_columns), so it gets its own domain rather than sitting in either one
+├── features/                    # one folder per MCP tool — nothing else lives at this level
+│   ├── check_for_updates/tool.ts        # ON-DEMAND "is this MCP up to date?" tool (the automatic once-per-session banner is injected by core/toolRegistration/registerTool.ts, not this tool)
+│   ├── build_requirements_adf/tool.ts   # use case 1 — tool wrapper
+│   ├── edit_page_requirements/tool.ts   # use case 2 — analyze + reshape an existing page
+│   ├── list_organizations/tool.ts       # use case 3
+│   ├── list_applications/tool.ts        # use case 3
+│   ├── list_searchable_fields/{tool.ts, schemaGrounding.ts}   # use case 3 — bounded sampling of a space to return its REAL identifiers
+│   ├── search_requirements/{tool.ts, dto.ts}                  # use case 3 — dto.ts's RequirementSummarySchema is THIS TOOL's own output contract, projected from core/dto.ts's wire Requirement via projectOn
+│   ├── list_relationships/tool.ts       # use case 3
+│   ├── link_requirements_to_jira/{tool.ts, jiraLinking.ts}    # use case 3 — MCP snake_case → DTORequirementSelection, batch execution with per-operation partial failure, report rendering
+│   ├── discover_matrix_columns/tool.ts        # use case 4 — the discovery loop
+│   ├── save_traceability_matrix/tool.ts       # use case 4 — validate every column, then persist
+│   ├── get_traceability_matrix/tool.ts        # use case 4 — read one back
+│   └── list_traceability_matrices/tool.ts     # use case 4 — find one
+├── docs/
+│   └── search-syntax-prompt-v3.md   # AUTHORITATIVE RQL syntax (from the backend ANTLR grammar + DSL eval); single source of truth
+└── prompts/                  # typed access to the generated prompts — no markdown lives here anymore
+    ├── descriptions.ts       # typed accessors (toolDescription, columnMeaning); a missing matrix_columns.md section — or an orphan one — is a COMPILE error, in both directions (ToolName needs no such check — see index.generated.ts below)
+    └── index.generated.ts    # AUTO-GENERATED from every tool's prompt.md + the shared prompts/ by embed-docs.mjs: TOOL_DESCRIPTIONS + COLUMN_MEANINGS (includes resolved, HTML comments stripped) AND TOOL_NAMES/ToolName, generated from the very same src/features/*/ folder listing in the same pass — one file, one generator, nothing to keep in sync by hand
 scripts/
-    ├── embed-docs.mjs        # build-time codegen: src/prompts/**/*.md → src/prompts/index.generated.ts (imported by both tsc and esbuild builds)
+    ├── embed-docs.mjs        # build-time codegen: src/features/*/prompt.md + src/shared/**/prompts/*.md → src/prompts/index.generated.ts (imported by both tsc and esbuild builds)
     └── build-bundle.mjs      # esbuild bundler: bakes env-specific values via `define` (RY_ENV + dev's .env.dev) → release/*.mjs
-tests/                        # unit tests, MIRRORING the src/ tree (tests/api/dto.test.ts ↔ src/api/dto.ts)
+tests/                        # unit tests, MIRRORING the src/ tree (tests/core/dto.test.ts ↔ src/core/dto.ts)
 ```
 
 ### Tests
 
-Tests live under `tests/` at the repo root, mirroring `src/` (`tests/api/dto.test.ts` covers
-`src/api/dto.ts`), and import the code under test with a `../../src/…` relative path. They are kept
-out of `src/` on purpose: `tsconfig` builds only `src/` (`rootDir: src`), so nothing test-related
-reaches `dist/`. Vitest's default glob picks up `tests/` with no extra config. When real
-API-integration tests arrive (see "What remains to be done"), give them their own `tests/integration/`
-so the fast unit suite stays network-free.
+Tests live under `tests/` at the repo root, mirroring `src/` (`tests/core/dto.test.ts` covers
+`src/core/dto.ts`, `tests/features/search_requirements/tool.test.ts` covers
+`src/features/search_requirements/tool.ts`), and import the code under test with a relative path back to
+`src/`. They are kept out of `src/` on purpose: `tsconfig` builds only `src/` (`rootDir: src`), so
+nothing test-related reaches `dist/`. Vitest's default glob picks up `tests/` with no extra config.
+When real API-integration tests arrive (see "What remains to be done"), give them their own
+`tests/integration/` so the fast unit suite stays network-free.
 
 ### Prompts are data, not code
 
-Every string the LLM reads lives in `src/prompts/**/*.md` — never in a `.ts` file. `scripts/embed-docs.mjs`
-(run by `generate:docs`, and automatically by `compile`/`bundle`/`test`) resolves `{{include:relative/path.md}}`
-directives, strips HTML comments, and emits the git-ignored `src/prompts/index.generated.ts`. Codegen
-(rather than a runtime `readFileSync`) is what lets the same import work in both the `tsc`→`dist/` build
-and the self-contained esbuild `.mjs` bundle.
+Every string the LLM reads lives in `src/features/*/prompt.md` or `src/shared/**/prompts/*.md` — never
+in a `.ts` file. `scripts/embed-docs.mjs` (run by `generate:docs`, and automatically by
+`compile`/`bundle`/`test`) derives each tool's name from its FOLDER (not a file basename), resolves
+`{{include:relative/path.md}}` directives, strips HTML comments, and emits the git-ignored
+`src/prompts/index.generated.ts`. Codegen (rather than a runtime `readFileSync`) is what lets the
+same import work in both the `tsc`→`dist/` build and the self-contained esbuild `.mjs` bundle.
+
+The same folder listing also generates `TOOL_NAMES`/`ToolName`, written into that SAME
+`index.generated.ts` alongside `TOOL_DESCRIPTIONS`/`COLUMN_MEANINGS` (one file, one generator run),
+instead of a hand-written enum kept in sync with it separately — a tool's name was previously typed
+twice (once in `TOOL_NAMES`, once as the folder name it had to match); now there is only one place to
+type it. `core/toolRegistration/registerTool.ts` imports it from there.
 
 Consequences worth knowing:
 - **Tuning a description is a markdown edit**, never a code change.
 - A tool's description is resolved by `registerTool` **from its name** — tool files don't carry one.
-  Adding a tool means adding it to `TOOL_NAMES` *and* creating `src/prompts/tools/<name>.md`; forgetting
-  either is a compile error in `src/prompts/descriptions.ts` (both directions are checked).
+  Adding a tool means creating `src/features/<name>/prompt.md`; its name becomes available as
+  `TOOL_NAMES.<camelCaseName>` automatically on the next build — nothing to declare by hand, and
+  nothing that can drift, since both come from the same folder scan.
 - The RQL reference is still written **once** in `src/docs/search-syntax-prompt-v3.md` and pulled in by
-  `fragments/search-syntax.md` — edit the markdown, never re-hardcode the syntax.
+  `shared/rql/prompts/search-syntax.md` — edit the markdown, never re-hardcode the syntax.
 
 ### Failures
 
-Tool handlers **do not catch**. They throw, and `registry.ts` turns the error into an `isError` result
-carrying the message plus the `guidance` of its class (see `src/errors.ts`). Every catch outside
-`registry.ts` exists on purpose and is commented as such — each either keeps a best-effort concern from
+Tool handlers **do not catch**. They throw, and `registerTool.ts` turns the error into an `isError` result
+carrying the message plus the `guidance` of its class (see `src/core/errors.ts`). Every catch outside
+`registerTool.ts` exists on purpose and is commented as such — each either keeps a best-effort concern from
 surfacing or degrades gracefully rather than aborting the whole call: `sendTelemetry` (best-effort, must
-never surface), the per-operation catch in `services/jiraLinking.ts` (a batch reports partial failures
-instead of aborting), the relationships lookup in `services/schemaGrounding.ts` (a failure there still
-returns the property names), the `/organizations` probe in `RyClient.resolveOrganizationId` (an
-unconfirmed endpoint must not sink the single-organization happy path), and `preservedFields` in
-`services/traceabilityMatrix.ts` (a stored definition that won't parse must not block the update that
-would repair it — it only costs the definition-level fallbacks). Input validation (`safeParse`,
-`JSON.parse`) still returns an `isError` result directly (via the shared `toolError` helper) — it is not
-an exception path.
+never surface), the per-operation catch in `features/link_requirements_to_jira/jiraLinking.ts` (a batch
+reports partial failures instead of aborting), the relationships lookup in
+`features/list_searchable_fields/schemaGrounding.ts` (a failure there still returns the property names),
+the `/organizations` probe in `RyClient.resolveOrganizationId` (an unconfirmed endpoint must not sink
+the single-organization happy path), and `preservedFields` in `shared/traceability/matrix.ts` (a
+stored definition that won't parse must not block the update that would repair it — it only costs the
+definition-level fallbacks). Input validation (`safeParse`, `JSON.parse`) still returns an `isError`
+result directly (via the shared `toolError` helper) — it is not an exception path.
 
 ### outputSchema
 
@@ -176,7 +205,7 @@ send the payload twice for no gain.
 | `get_traceability_matrix` | `matrix_id`, `base_url?` | the saved matrix + its definition parsed out of `json` | Use case 4 — read back |
 | `list_traceability_matrices` | `space?`, `name?`, `owned?`, `traceability_only?`, `offset?`, `limit?` | paginated summaries | Use case 4 — find an existing saved matrix (and its id) |
 
-The two ADF tools produce ADF, ready to be published with `contentFormat: "adf"`. Both share the renderers in `adfRender.ts` so RY formatting is identical whether a page is created or edited. **ADF is the single source of truth** — there is no Markdown intermediate and no refine loop (a Markdown roundtrip would destroy an existing page's formatting).
+The two ADF tools produce ADF, ready to be published with `contentFormat: "adf"`. Both share the renderers in `shared/document_indexing/render.ts` so RY formatting is identical whether a page is created or edited. **ADF is the single source of truth** — there is no Markdown intermediate and no refine loop (a Markdown roundtrip would destroy an existing page's formatting).
 
 ## Version & update check
 
@@ -188,12 +217,12 @@ git-ignored `src/version.generated.ts` so the running server knows its own versi
 
 The check compares that version against the latest GitHub release
 (`GET https://api.github.com/repos/requirement-yogi/ry-ai-assistant/releases/latest`, in
-`src/api/githubReleases.ts`) using a small semver comparator. It is **best-effort**: offline /
+`src/core/githubReleases.ts`) using a small semver comparator. It is **best-effort**: offline /
 rate-limited (403) / no-release (404) all yield a `{ checked: false }` result with a note, never an
 error.
 
 **It does NOT rely on the LLM calling a tool** (clients often don't). The flow, all in
-`src/updateCheck.ts`:
+`src/core/updateCheck.ts`:
 - `index.ts` calls `startUpdateCheck()` at boot → one GitHub round-trip per process (≈ per session),
   cached, with the resolved value mirrored into a plain variable.
 - `withTelemetry` (the choke point every tool passes through) calls `takeReadyUpdateNotice()` after
@@ -201,8 +230,8 @@ error.
   zero added latency) and **one-shot** (fires at most once per session, and only when an update is
   actually available). The banner — a `[Requirement Yogi AI Assistant — update available]` block —
   is prepended to that first tool result. It's skipped for `check_for_updates` itself.
-- `check_for_updates` (`src/tools/updates.ts`) remains for an explicit re-check, sharing the same
-  cached result.
+- `check_for_updates` (`src/features/check_for_updates/tool.ts`) remains for an explicit re-check,
+  sharing the same cached result.
 
 The server's `instructions` (in `index.ts`) just tell the LLM how to react to the banner; they are
 not what triggers the check.
@@ -277,8 +306,9 @@ The MCP owns the Requirement Yogi side; the Jira side is delegated to the Atlass
 - Reliable RQL is achieved through **three complementary mechanisms**:
   1. **Reference in context** — the authoritative RQL syntax (`src/docs/search-syntax-prompt-v3.md`,
      derived from the backend ANTLR grammar + DSL eval) is embedded in the `search_requirements`
-     tool description via `src/prompts/fragments/search-syntax.md`, which includes it at build time
-     (never hardcoded).
+     tool description via `src/shared/rql/prompts/search-syntax.md` (its own shared domain, since
+     it's the one fragment used across two different tool domains — search_requirements AND
+     discover_matrix_columns), which includes it at build time (never hardcoded).
   2. **Schema grounding** — `list_searchable_fields(space)` returns the space's REAL identifiers so
      the LLM can't invent names (its description says to call it first if unsure). It is built from
      confirmed endpoints only: relationship names from `/relationships`, and properties/variants/
@@ -345,8 +375,8 @@ no reason to hand a backend a null collection to iterate.
 So discovery is inherently **iterative, one round trip per level of depth**: the suggestions for
 level N+1 cannot exist before level N does. `discover_matrix_columns` is that single round trip
 (column 0 + the columns already chosen → the candidates for every one of them), and the **LLM walks
-the loop** by calling it again with the columns it kept. `services/traceabilityMatrix.ts` owns the
-probe; `services/matrixColumns.ts` owns the suggestion → column translation.
+the loop** by calling it again with the columns it kept. `shared/traceability/matrix.ts` owns the
+probe; `shared/traceability/matrixColumns.ts` owns the suggestion → column translation.
 
 ### The three traps, all handled in code and covered by tests
 
@@ -405,7 +435,7 @@ Two mechanisms keep the hard-coded vocabulary from rotting:
    silently absent forever. Zero maintenance: declaring the field in the DTO stops the report.
 2. **Adding a type is compiler-guided.** Appending one value to `STEP_TYPES` produces exactly three
    errors, which are the three things it needs: a `DEFAULT_LABELS` entry, a `## <TYPE>` section in
-   `src/prompts/matrix_columns.md` (via `descriptions.ts`), and a `resolveColumn` case — the `default` branch
+   `src/shared/traceability/prompts/matrix_columns.md` (via `descriptions.ts`), and a `resolveColumn` case — the `default` branch
    assigns `request.type` to `keyof typeof FLAG_GATED_STEPS`, so a new type cannot silently fall
    through into "treated as a boolean flag". What stays manual is the suggestion field and its mapping,
    which is irreducible: only a human knows that `fooSuggestions[].foo` is the value of type `FOO`.
@@ -416,7 +446,7 @@ A step type is an enum name, and a model cannot act on `ORIGINAL_LINKS`. Observe
 "add the pages where the requirements are written", the LLM answered that it could not — while
 `ORIGINAL_LINKS` was sitting in the suggestions.
 
-The meanings therefore live in **`src/prompts/matrix_columns.md`**, one `## STEP_TYPE` section per type,
+The meanings therefore live in **`src/shared/traceability/prompts/matrix_columns.md`**, one `## STEP_TYPE` section per type,
 written ONCE and used twice:
 
 - **included** in the `discover_matrix_columns` description, so the model knows what exists *before*
@@ -457,7 +487,7 @@ subtleties, both owned by `toSavedMatrixPayload` and nowhere else:
   limit, spaceKey })`.
 - A step that carries no value gets **`value: ""`, never `null`** (`NO_STEP_VALUE`). The backend
   tolerates both, but `""` is what Requirement Yogi itself writes. The reference is a real stored
-  definition, pinned as a golden test in `tests/services/traceabilityMatrix.test.ts`
+  definition, pinned as a golden test in `tests/shared/traceability/matrix.test.ts`
   (`REAL_STORED_DEFINITION`) — the shape this MCP must reproduce field for field. Update that
   fixture, not the code's expectations, if a newer product version writes something different.
 - **`query` is duplicated** — once at the root (what the saved-matrix list filters on) and once
@@ -515,7 +545,7 @@ Build-time (baked by `scripts/build-bundle.mjs`, **not** in the MCP config):
 | `RY_DEV_CONFLUENCE_URL` | **dev only, from `.env.dev`** — this developer's Confluence dev instance base URL (their own tunnel). Required for `build:dev`. |
 | `RY_DEV_STANDALONE_URL` | **dev only, from `.env.dev`** — this developer's standalone API base URL. Optional; defaults to `http://localhost:8082/api`. |
 
-Hosts per residency (in `src/api/ryClient.ts`): old Confluence REST API
+Hosts per residency (in `src/core/ryClient.ts`): old Confluence REST API
 `https://confluence[.us].requirementyogi.com` (search + jira-bulk links + traceability/saved
 matrices), new standalone API
 `https://api[.us].requirementyogi.com/api` (applications + relationships).
@@ -553,12 +583,12 @@ Use case 4 (traceability matrix saved query):
 
 ## What remains to be done
 
-- [x] Tests on `adfRender.ts` (pure) and on `editPage.ts` helpers (`applyReplace`/`anchoredInject`/`applyInsertAfter`, exported) covering table grouping and nested-container splicing
+- [x] Tests on `shared/document_indexing/render.ts` (pure) and on `edit_page_requirements/tool.ts` helpers (`applyReplace`/`anchoredInject`/`applyInsertAfter`, exported) covering table grouping and nested-container splicing
 - [ ] Tests on the `edit_page_requirements` **handler** (the four operation modes end to end); the helpers underneath are covered, the operation dispatch is not
 - [ ] `applyReplace`/`applyInsertAfter` act on a single deepest container — anchors spanning two different containers only handle the first; revisit if needed
 - [ ] Decide whether a section node should ever also be an indexed requirement (currently a parent's `key` is ignored)
-- [ ] Fine-tune tool descriptions based on LLM quality feedback — now a pure markdown edit under `src/prompts/tools/`
+- [ ] Fine-tune tool descriptions based on LLM quality feedback — now a pure markdown edit under `src/features/<name>/prompt.md`
 - [ ] Use case 4: confirm the element shape of `zephyrScaleFields` / `xrayFields` and the response shape of `POST /rest/saved-matrices/search` against the real API — the first is only loosely matched (a miss warns instead of rejecting) and the second goes through the lenient `extractItems` envelope
 - [ ] Use case 4: no MCP tool deletes a saved matrix; `RyClient.deleteSavedMatrix` exists if one is ever wanted
-- [ ] Use case 3: confirm the `GET /organizations` endpoint path/shape on the standalone API (assumed from the `?organizationId=` param of `/applications`), then test the whole flow against the real RY APIs. The DTOs in `src/api/dto.ts` are deliberately lenient until then — tighten them (and drop the `nullish`) once the shapes are confirmed
+- [ ] Use case 3: confirm the `GET /organizations` endpoint path/shape on the standalone API (assumed from the `?organizationId=` param of `/applications`), then test the whole flow against the real RY APIs. The DTOs in `src/core/dto.ts` are deliberately lenient until then — tighten them (and drop the `nullish`) once the shapes are confirmed
 ```

@@ -1,12 +1,20 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
-import { registerBuildAdfTool } from "./tools/buildAdf.js"
-import { registerEditPageTool } from "./tools/editPage.js"
-import { registerJiraLinkTools } from "./tools/jiraLinks.js"
-import { registerTraceabilityTools } from "./tools/traceability.js"
-import { registerUpdatesTool } from "./tools/updates.js"
-import { startUpdateCheck } from "./updateCheck.js"
+import { registerBuildAdfTool } from "./features/build_requirements_adf/tool.js"
+import { registerEditPageTool } from "./features/edit_page_requirements/tool.js"
+import { registerListOrganizationsTool } from "./features/list_organizations/tool.js"
+import { registerListApplicationsTool } from "./features/list_applications/tool.js"
+import { registerListSearchableFieldsTool } from "./features/list_searchable_fields/tool.js"
+import { registerSearchRequirementsTool } from "./features/search_requirements/tool.js"
+import { registerListRelationshipsTool } from "./features/list_relationships/tool.js"
+import { registerLinkRequirementsToJiraTool } from "./features/link_requirements_to_jira/tool.js"
+import { registerDiscoverMatrixColumnsTool } from "./features/discover_matrix_columns/tool.js"
+import { registerSaveTraceabilityMatrixTool } from "./features/save_traceability_matrix/tool.js"
+import { registerGetTraceabilityMatrixTool } from "./features/get_traceability_matrix/tool.js"
+import { registerListTraceabilityMatricesTool } from "./features/list_traceability_matrices/tool.js"
+import { registerUpdatesTool } from "./features/check_for_updates/tool.js"
+import { startUpdateCheck } from "./core/updateCheck/updateCheck.js"
 import { VERSION } from "./version.generated.js"
 
 const server = new McpServer(
@@ -36,9 +44,17 @@ registerBuildAdfTool(server)
 // Use case 2: analyze an existing page and reshape it so requirements are indexable.
 registerEditPageTool(server)
 // Use case 3: link requirements to Jira issues through the Requirement Yogi API.
-registerJiraLinkTools(server)
+registerListOrganizationsTool(server)
+registerListApplicationsTool(server)
+registerListSearchableFieldsTool(server)
+registerSearchRequirementsTool(server)
+registerListRelationshipsTool(server)
+registerLinkRequirementsToJiraTool(server)
 // Use case 4: create traceability-matrix saved queries (query + column tree) in Requirement Yogi.
-registerTraceabilityTools(server)
+registerDiscoverMatrixColumnsTool(server)
+registerSaveTraceabilityMatrixTool(server)
+registerGetTraceabilityMatrixTool(server)
+registerListTraceabilityMatricesTool(server)
 
 const transport = new StdioServerTransport()
 await server.connect(transport)
