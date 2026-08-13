@@ -91,7 +91,9 @@ function fakeApi({ pages, relationships = [], relationshipsError }: FakeOptions)
   return { api, calls }
 }
 
-const withProperties = (...labels: string[]) => ({ properties: labels.map((label) => ({ label })) })
+const withProperties = (...labels: string[]) => ({
+  properties: Object.fromEntries(labels.map((label) => [label, { label }])),
+})
 
 describe("listSearchableFields", () => {
   it("returns the real identifiers of the space, sorted and de-duplicated", async () => {
