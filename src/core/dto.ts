@@ -58,8 +58,7 @@ export const RelationshipSchema = z.looseObject({
   label: z.string().nullish(),
 })
 
-// A requirement property arrives as { label | name | key, value, external? }. The three name
-// spellings and the three "is external" spellings are the API's, not ours.
+// A requirement property
 export const RequirementPropertySchema = z.looseObject({
   label: z.string().nullish(),
   name: z.string().nullish(),
@@ -69,6 +68,8 @@ export const RequirementPropertySchema = z.looseObject({
   isExternal: z.boolean().nullish(),
   ext: z.boolean().nullish(),
 })
+
+export const RequirementPropertiesSchema = z.record(z.string(), RequirementPropertySchema)
 
 // A full DTORequirement is huge (storage data, recursive dependencies, rules…). This wire DTO only
 // NAMES the fields any tool needs; everything else still rides along thanks to the loose object.
@@ -84,7 +85,7 @@ export const RequirementSchema = z.looseObject({
   variantId: z.number().int().nullish(),
   status: z.string().nullish(),
   canonicalURL: z.string().nullish(),
-  properties: z.array(RequirementPropertySchema).nullish(),
+  properties: RequirementPropertiesSchema.nullish(),
 })
 
 // DTOSearchResult<DTORequirement> from GET /rest/search. `results` is a LENIENT array: a single
